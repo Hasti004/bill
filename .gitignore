@@ -16,7 +16,7 @@ build/
 *.local
 
 # Environment variables
-.env
+# .env - REMOVED: User requested to track .env files
 .env.local
 .env.development.local
 .env.test.local
