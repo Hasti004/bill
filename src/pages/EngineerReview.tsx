@@ -77,12 +77,35 @@ export default function EngineerReview() {
   const [reviewLoading, setReviewLoading] = useState(false);
   const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [engineerApprovalLimit, setEngineerApprovalLimit] = useState<number>(50000);
 
   useEffect(() => {
     if (userRole === "engineer") {
+      fetchEngineerApprovalLimit();
       fetchAssignedExpenses();
     }
   }, [userRole, user]);
+
+  const fetchEngineerApprovalLimit = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("settings")
+        .select("value")
+        .eq("key", "engineer_approval_limit")
+        .maybeSingle();
+
+      if (error) {
+        console.error("Error fetching approval limit:", error);
+        return;
+      }
+
+      if (data) {
+        setEngineerApprovalLimit(parseFloat(data.value) || 50000);
+      }
+    } catch (error) {
+      console.error("Error fetching approval limit:", error);
+    }
+  };
 
   const fetchAssignedExpenses = async () => {
     try {
@@ -191,9 +214,44 @@ export default function EngineerReview() {
     }
   };
 
+  const approveExpense = async () => {
+    if (!selectedExpense || !user) return;
+
+    try {
+      setReviewLoading(true);
+
+      // Use ExpenseService to approve (this handles balance deduction)
+      await ExpenseService.approveExpense(selectedExpense.id, user.id, engineerComment);
+
+      toast({
+        title: "Expense Approved",
+        description: `Expense approved and ₹${selectedExpense.total_amount} deducted from employee balance.`,
+      });
+
+      setSelectedExpense(null);
+      setEngineerComment("");
+      setLineItems([]);
+      setAttachments([]);
+      fetchAssignedExpenses();
+    } catch (error: any) {
+      console.error("Error approving expense:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Failed to approve expense",
+      });
+    } finally {
+      setReviewLoading(false);
+    }
+  };
+
   const isActionDisabled = (exp?: Expense | null) => {
     if (!exp) return true;
-    return ["approved", "verified"].includes(exp.status);
+    // Allow action on "submitted" expenses (engineers can verify or approve based on limit)
+    // Disable action only if already "approved" or "verified" (for expenses above limit)
+    if (exp.status === "approved") return true;
+    if (exp.status === "verified" && exp.total_amount >= engineerApprovalLimit) return true;
+    return false;
   };
 
   const getStats = () => {
@@ -548,13 +606,25 @@ export default function EngineerReview() {
                             >
                               Cancel
                             </Button>
-                            <Button 
-                              onClick={() => verifyExpense()}
-                              disabled={reviewLoading || isActionDisabled(selectedExpense)}
-                            >
-                              <CheckCircle className="mr-2 h-4 w-4" />
-                              Verify
-                            </Button>
+                            {selectedExpense && selectedExpense.total_amount < engineerApprovalLimit ? (
+                              // Below limit: Show only Approve button
+                              <Button 
+                                onClick={() => approveExpense()}
+                                disabled={reviewLoading || isActionDisabled(selectedExpense)}
+                              >
+                                <CheckCircle className="mr-2 h-4 w-4" />
+                                Approve
+                              </Button>
+                            ) : (
+                              // At or above limit: Show only Verify button
+                              <Button 
+                                onClick={() => verifyExpense()}
+                                disabled={reviewLoading || isActionDisabled(selectedExpense)}
+                              >
+                                <CheckCircle className="mr-2 h-4 w-4" />
+                                Verify
+                              </Button>
+                            )}
                           </DialogFooter>
                         </DialogContent>
                       </Dialog>

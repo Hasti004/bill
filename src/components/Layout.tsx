@@ -5,17 +5,28 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { formatINR } from "@/lib/format";
-import { Wallet, Pencil } from "lucide-react";
+import { Wallet, Pencil, Eye, EyeOff, CheckCircle, AlertCircle } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { useToast } from "@/hooks/use-toast";
+import { Separator } from "@/components/ui/separator";
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const { userProfile, userRole, user, refreshUserProfile } = useAuth();
+  const { toast } = useToast();
   const [userBalance, setUserBalance] = useState<number | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [savingName, setSavingName] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
   
   const getInitials = (name: string) => {
     return name
@@ -131,36 +142,258 @@ export function Layout({ children }: { children: React.ReactNode }) {
             </div>
           </div>
 
-          {/* Edit Name Drawer */}
-          <Sheet open={editOpen} onOpenChange={setEditOpen}>
-            <SheetContent side="right" className="w-full sm:max-w-md">
+          {/* Edit Profile Drawer */}
+          <Sheet open={editOpen} onOpenChange={(open) => {
+            setEditOpen(open);
+            if (!open) {
+              // Reset all fields when closing
+              setCurrentPassword("");
+              setNewPassword("");
+              setConfirmPassword("");
+              setShowCurrentPassword(false);
+              setShowNewPassword(false);
+              setShowConfirmPassword(false);
+            }
+          }}>
+            <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
               <SheetHeader>
                 <SheetTitle>Edit Profile</SheetTitle>
-                <SheetDescription>Update your display name</SheetDescription>
+                <SheetDescription>Update your display name and password</SheetDescription>
               </SheetHeader>
-              <div className="py-4 space-y-3">
-                <label className="text-sm font-medium text-gray-700">Full Name</label>
-                <Input value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} placeholder="Your name" />
-                <div className="pt-2 flex gap-2">
-                  <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
-                  <Button disabled={savingName || !nameDraft.trim()} onClick={async () => {
-                    if (!user?.id) return;
-                    try {
-                      setSavingName(true);
-                      const { error } = await supabase
-                        .from("profiles")
-                        .update({ name: nameDraft.trim() })
-                        .eq("user_id", user.id);
-                      if (error) throw error;
-                      await refreshUserProfile(user.id);
-                      setEditOpen(false);
-                    } catch (e) {
-                      console.error("Failed to update name", e);
-                    } finally {
-                      setSavingName(false);
-                    }
-                  }}>{savingName ? 'Saving...' : 'Save'}</Button>
+              <div className="py-4 space-y-6">
+                {/* Name Section */}
+                <div className="space-y-2">
+                  <Label htmlFor="name" className="text-sm font-medium text-gray-700">Full Name</Label>
+                  <Input 
+                    id="name"
+                    value={nameDraft} 
+                    onChange={(e) => setNameDraft(e.target.value)} 
+                    placeholder="Your name" 
+                  />
                 </div>
+
+                <Separator />
+
+                {/* Password Change Section */}
+                <div className="space-y-4">
+                  <div>
+                    <Label className="text-sm font-medium text-gray-700">Change Password</Label>
+                    <p className="text-xs text-gray-500 mt-1">Enter your current password and set a new one</p>
+                  </div>
+
+                  {/* Current Password */}
+                  <div className="space-y-2">
+                    <Label htmlFor="current-password" className="text-sm font-medium text-gray-700">Current Password</Label>
+                    <div className="relative">
+                      <Input
+                        id="current-password"
+                        type={showCurrentPassword ? "text" : "password"}
+                        value={currentPassword}
+                        onChange={(e) => setCurrentPassword(e.target.value)}
+                        placeholder="Enter your current password"
+                        className="pr-10"
+                      />
+                      {currentPassword && (
+                        <button
+                          type="button"
+                          onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                          className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors focus:outline-none"
+                          aria-label={showCurrentPassword ? "Hide password" : "Show password"}
+                        >
+                          {showCurrentPassword ? (
+                            <EyeOff className="h-4 w-4" />
+                          ) : (
+                            <Eye className="h-4 w-4" />
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* New Password */}
+                  <div className="space-y-2">
+                    <Label htmlFor="new-password" className="text-sm font-medium text-gray-700">New Password</Label>
+                    <div className="relative">
+                      <Input
+                        id="new-password"
+                        type={showNewPassword ? "text" : "password"}
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        placeholder="Enter new password (min 8 characters)"
+                        className={`pr-10 ${
+                          newPassword && newPassword.length < 8 ? "border-red-300 focus:border-red-500" : ""
+                        }`}
+                      />
+                      <div className="absolute right-3 top-1/2 transform -translate-y-1/2 flex items-center gap-2">
+                        {newPassword && newPassword.length >= 8 && (
+                          <CheckCircle className="h-4 w-4 text-green-500" />
+                        )}
+                        {newPassword && (
+                          <button
+                            type="button"
+                            onClick={() => setShowNewPassword(!showNewPassword)}
+                            className="text-gray-400 hover:text-gray-600 transition-colors focus:outline-none"
+                            aria-label={showNewPassword ? "Hide password" : "Show password"}
+                          >
+                            {showNewPassword ? (
+                              <EyeOff className="h-4 w-4" />
+                            ) : (
+                              <Eye className="h-4 w-4" />
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {newPassword && newPassword.length < 8 && (
+                      <p className="text-xs text-red-500 flex items-center gap-1">
+                        <AlertCircle className="h-3 w-3" />
+                        Password must be at least 8 characters long
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Confirm Password */}
+                  <div className="space-y-2">
+                    <Label htmlFor="confirm-password" className="text-sm font-medium text-gray-700">Confirm New Password</Label>
+                    <div className="relative">
+                      <Input
+                        id="confirm-password"
+                        type={showConfirmPassword ? "text" : "password"}
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        placeholder="Confirm new password"
+                        className={`pr-10 ${
+                          confirmPassword && newPassword && confirmPassword !== newPassword ? "border-red-300 focus:border-red-500" : ""
+                        }`}
+                      />
+                      <div className="absolute right-3 top-1/2 transform -translate-y-1/2 flex items-center gap-2">
+                        {confirmPassword && newPassword && confirmPassword === newPassword && newPassword.length >= 8 && (
+                          <CheckCircle className="h-4 w-4 text-green-500" />
+                        )}
+                        {confirmPassword && (
+                          <button
+                            type="button"
+                            onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                            className="text-gray-400 hover:text-gray-600 transition-colors focus:outline-none"
+                            aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                          >
+                            {showConfirmPassword ? (
+                              <EyeOff className="h-4 w-4" />
+                            ) : (
+                              <Eye className="h-4 w-4" />
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {confirmPassword && newPassword && confirmPassword !== newPassword && (
+                      <p className="text-xs text-red-500 flex items-center gap-1">
+                        <AlertCircle className="h-3 w-3" />
+                        Passwords do not match
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="pt-4 flex gap-2">
+                  <Button 
+                    variant="outline" 
+                    onClick={() => {
+                      setEditOpen(false);
+                      setCurrentPassword("");
+                      setNewPassword("");
+                      setConfirmPassword("");
+                    }}
+                    className="flex-1"
+                  >
+                    Cancel
+                  </Button>
+                  <Button 
+                    disabled={savingName || changingPassword || !nameDraft.trim()} 
+                    onClick={async () => {
+                      if (!user?.id) return;
+                      try {
+                        setSavingName(true);
+                        const { error } = await supabase
+                          .from("profiles")
+                          .update({ name: nameDraft.trim() })
+                          .eq("user_id", user.id);
+                        if (error) throw error;
+                        await refreshUserProfile(user.id);
+                        toast({
+                          title: "Profile Updated",
+                          description: "Your name has been updated successfully",
+                        });
+                      } catch (e: any) {
+                        console.error("Failed to update name", e);
+                        toast({
+                          variant: "destructive",
+                          title: "Error",
+                          description: e.message || "Failed to update name",
+                        });
+                      } finally {
+                        setSavingName(false);
+                      }
+                    }}
+                    className="flex-1"
+                  >
+                    {savingName ? 'Saving...' : 'Save Name'}
+                  </Button>
+                </div>
+
+                {/* Change Password Button */}
+                {(currentPassword || newPassword || confirmPassword) && (
+                  <Button 
+                    disabled={changingPassword || !currentPassword || !newPassword || !confirmPassword || newPassword.length < 8 || newPassword !== confirmPassword}
+                    onClick={async () => {
+                      if (!user?.email) return;
+                      
+                      try {
+                        setChangingPassword(true);
+
+                        // Verify current password by attempting to sign in
+                        const { error: signInError } = await supabase.auth.signInWithPassword({
+                          email: user.email,
+                          password: currentPassword,
+                        });
+
+                        if (signInError) {
+                          throw new Error("Current password is incorrect");
+                        }
+
+                        // Update password
+                        const { error: updateError } = await supabase.auth.updateUser({
+                          password: newPassword,
+                        });
+
+                        if (updateError) throw updateError;
+
+                        toast({
+                          title: "Password Changed",
+                          description: "Your password has been updated successfully",
+                        });
+
+                        // Clear password fields
+                        setCurrentPassword("");
+                        setNewPassword("");
+                        setConfirmPassword("");
+                      } catch (e: any) {
+                        console.error("Failed to change password", e);
+                        toast({
+                          variant: "destructive",
+                          title: "Error",
+                          description: e.message || "Failed to change password",
+                        });
+                      } finally {
+                        setChangingPassword(false);
+                      }
+                    }}
+                    className="w-full"
+                  >
+                    {changingPassword ? 'Changing Password...' : 'Change Password'}
+                  </Button>
+                )}
               </div>
             </SheetContent>
           </Sheet>

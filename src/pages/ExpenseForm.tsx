@@ -86,26 +86,6 @@ export default function ExpenseForm() {
     if (id && id !== "new") {
       fetchExpense();
       setIsEditing(true);
-    } else if (id === "new") {
-      // Check for template data
-      const templateData = sessionStorage.getItem('expenseTemplate');
-      if (templateData) {
-        try {
-          const template = JSON.parse(templateData);
-          setExpense(prev => ({
-            ...prev,
-            title: template.title || "",
-            purpose: template.purpose || ""
-          }));
-          
-          // commonItems removed from form
-          
-          // Clear template data after use
-          sessionStorage.removeItem('expenseTemplate');
-        } catch (error) {
-          console.error("Error parsing template data:", error);
-        }
-      }
     }
   }, [id]);
 

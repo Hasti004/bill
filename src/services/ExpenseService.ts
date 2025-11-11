@@ -1,5 +1,11 @@
 import { supabase } from "@/integrations/supabase/client";
 import { Database } from "@/integrations/supabase/types";
+import { 
+  notifyExpenseVerified, 
+  notifyExpenseApproved, 
+  notifyExpenseSubmitted,
+  notifyEngineerExpenseApproved
+} from "./NotificationService";
 
 type Expense = Database["public"]["Tables"]["expenses"]["Row"];
 type ExpenseInsert = Database["public"]["Tables"]["expenses"]["Insert"];
@@ -165,7 +171,66 @@ export class ExpenseService {
 
     // Line items are not required anymore for submission
 
-    // Find employee's reporting engineer
+    // Check if user is an engineer
+    const isEngineer = await this.hasRole(userId, "engineer");
+
+    if (isEngineer) {
+      // Engineers' expenses go directly to admin (no engineer assignment)
+      const updatePayload: any = {
+        status: "submitted",
+        assigned_engineer_id: null, // No engineer assignment - goes to admin
+        updated_at: new Date().toISOString(),
+      };
+
+      const { data: updatedExpense, error: updateError } = await supabase
+        .from("expenses")
+        .update(updatePayload)
+        .eq("id", expenseId)
+        .select()
+        .single();
+
+      if (updateError) throw updateError;
+
+      // Log the action
+      const logMsg = `Expense submitted by engineer - sent directly to admin`;
+      await this.logAction(expenseId, userId, "expense_submitted", logMsg);
+
+      // Get expense title and employee name
+      const { data: expenseData } = await supabase
+        .from("expenses")
+        .select("title")
+        .eq("id", expenseId)
+        .single();
+
+      const { data: employeeProfile } = await supabase
+        .from("profiles")
+        .select("name")
+        .eq("user_id", userId)
+        .single();
+
+      // Get all admin user IDs
+      const { data: adminRoles } = await supabase
+        .from("user_roles")
+        .select("user_id")
+        .eq("role", "admin");
+
+      const adminUserIds = adminRoles?.map(r => r.user_id) || [];
+
+      // Notify all admins
+      if (expenseData && adminUserIds.length > 0) {
+        await notifyExpenseSubmitted(
+          expenseId,
+          expenseData.title,
+          employeeProfile?.name || "Engineer",
+          null, // No engineer assigned
+          adminUserIds
+        );
+      }
+
+      return updatedExpense;
+    }
+
+    // For employees: Find employee's reporting engineer
     const { data: profileRaw, error: profileError } = await supabase
       .from("profiles")
       .select("reporting_engineer_id")
@@ -176,17 +241,11 @@ export class ExpenseService {
 
     if (profileError) throw profileError;
 
-    // Require a reporting engineer so the expense always routes to someone
-    if (!profile?.reporting_engineer_id) {
-      throw new Error(
-        "No reporting engineer is assigned to your profile. Please contact admin to set your reporting engineer before submitting the expense."
-      );
-    }
-
-    // Auto-assign to reporting engineer and move to submitted
+    // If employee has a reporting engineer, assign to them
+    // If not, send directly to admin (assigned_engineer_id = null)
     const updatePayload: any = {
       status: "submitted",
-      assigned_engineer_id: profile?.reporting_engineer_id,
+      assigned_engineer_id: profile?.reporting_engineer_id || null, // null if no engineer assigned
       updated_at: new Date().toISOString(),
     };
 
@@ -199,9 +258,57 @@ export class ExpenseService {
 
     if (updateError) throw updateError;
 
-    // Log the action
-    const logMsg = `Expense submitted and auto-assigned to engineer ${profile?.reporting_engineer_id}`;
-    await this.logAction(expenseId, userId, "expense_submitted", logMsg);
+    // Get expense title and employee name
+    const { data: expenseData } = await supabase
+      .from("expenses")
+      .select("title")
+      .eq("id", expenseId)
+      .single();
+
+    const { data: employeeProfile } = await supabase
+      .from("profiles")
+      .select("name")
+      .eq("user_id", userId)
+      .single();
+
+    if (profile?.reporting_engineer_id) {
+      // Employee has reporting engineer - assign to engineer and notify them
+      const logMsg = `Expense submitted and auto-assigned to engineer ${profile.reporting_engineer_id}`;
+      await this.logAction(expenseId, userId, "expense_submitted", logMsg);
+
+      // Notify assigned engineer
+      if (expenseData) {
+        await notifyExpenseSubmitted(
+          expenseId,
+          expenseData.title,
+          employeeProfile?.name || "Employee",
+          profile.reporting_engineer_id
+        );
+      }
+    } else {
+      // Employee has no reporting engineer - send directly to admin
+      const logMsg = `Expense submitted by employee without assigned engineer - sent directly to admin`;
+      await this.logAction(expenseId, userId, "expense_submitted", logMsg);
+
+      // Get all admin user IDs
+      const { data: adminRoles } = await supabase
+        .from("user_roles")
+        .select("user_id")
+        .eq("role", "admin");
+
+      const adminUserIds = adminRoles?.map(r => r.user_id) || [];
+
+      // Notify all admins
+      if (expenseData && adminUserIds.length > 0) {
+        await notifyExpenseSubmitted(
+          expenseId,
+          expenseData.title,
+          employeeProfile?.name || "Employee",
+          null, // No engineer assigned
+          adminUserIds
+        );
+      }
+    }
 
     return updatedExpense;
   }
@@ -290,21 +397,46 @@ export class ExpenseService {
     // Log the action
     await this.logAction(expenseId, engineerId, "expense_verified", comment);
 
+    // Get expense details and employee info for notification
+    const { data: expenseData, error: expenseFetchError } = await supabase
+      .from("expenses")
+      .select("title, user_id")
+      .eq("id", expenseId)
+      .single();
+
+    if (!expenseFetchError && expenseData) {
+      // Get engineer name
+      const { data: engineerProfile } = await supabase
+        .from("profiles")
+        .select("name")
+        .eq("user_id", engineerId)
+        .single();
+
+      // Create notification for employee
+      await notifyExpenseVerified(
+        expenseId,
+        expenseData.title,
+        expenseData.user_id,
+        engineerProfile?.name || "Engineer"
+      );
+    }
+
     return updatedExpense;
   }
 
   /**
-   * Approve expense (admin action)
+   * Approve expense (admin or engineer action)
    */
   static async approveExpense(
     expenseId: string,
-    adminId: string,
+    approverId: string,
     comment?: string
   ): Promise<Expense> {
-    // Check if admin has permission
-    const isAdmin = await this.hasRole(adminId, "admin");
-    if (!isAdmin) {
-      throw new Error("Only administrators can approve expenses");
+    // Check if approver has permission (admin or engineer)
+    const isAdmin = await this.hasRole(approverId, "admin");
+    const isEngineer = await this.hasRole(approverId, "engineer");
+    if (!isAdmin && !isEngineer) {
+      throw new Error("Only administrators or engineers can approve expenses");
     }
 
     // Fetch expense first for amount and user_id
@@ -316,12 +448,53 @@ export class ExpenseService {
 
     if (fetchError) throw fetchError;
 
-    // Check if expense is verified (engineer approval required)
+    // Check if expense is already approved
     if (expense.status === "approved") {
       throw new Error("This expense is already approved");
     }
-    if (expense.status !== "verified") {
-      throw new Error("Expense must be verified by an engineer before admin approval");
+    
+    // Engineers can approve submitted expenses (below limit)
+    // Admins can approve both submitted and verified expenses (auto-verifies submitted expenses)
+    if (isEngineer && expense.status !== "submitted") {
+      throw new Error("Engineers can only approve submitted expenses");
+    }
+    if (isAdmin && expense.status !== "submitted" && expense.status !== "verified") {
+      throw new Error("Admins can only approve submitted or verified expenses");
+    }
+    
+    // If admin is approving a submitted expense, auto-verify it first
+    if (isAdmin && expense.status === "submitted") {
+      // Auto-verify: Update status to verified first
+      const { error: verifyError } = await supabase
+        .from("expenses")
+        .update({
+          status: "verified",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", expenseId);
+      
+      if (verifyError) throw verifyError;
+      
+      // Log the auto-verification
+      await this.logAction(expenseId, approverId, "expense_verified", "Auto-verified by admin during approval");
+      
+      // Get admin name for notification
+      const { data: adminProfile } = await supabase
+        .from("profiles")
+        .select("name")
+        .eq("user_id", approverId)
+        .single();
+      
+      // Send verification notification to employee
+      await notifyExpenseVerified(
+        expenseId,
+        expense.title,
+        expense.user_id,
+        adminProfile?.name || "Admin"
+      );
+      
+      // Update expense status for the rest of the function
+      expense.status = "verified";
     }
 
     // Get current balance before approval
@@ -379,7 +552,37 @@ export class ExpenseService {
 
     // Log the action with balance information
     const logComment = `${comment || ''} Balance deducted: ₹${expenseAmount.toFixed(2)}. Remaining balance: ₹${newBalance.toFixed(2)}`.trim();
-    await this.logAction(expenseId, adminId, "expense_approved", logComment);
+    await this.logAction(expenseId, approverId, "expense_approved", logComment);
+
+    // Get approver name for notification
+    const { data: approverProfile } = await supabase
+      .from("profiles")
+      .select("name")
+      .eq("user_id", approverId)
+      .single();
+
+    // Check if the expense owner is an engineer
+    const expenseOwnerIsEngineer = await this.hasRole(expense.user_id, "engineer");
+
+    if (expenseOwnerIsEngineer) {
+      // Notify engineer that their expense was approved
+      await notifyEngineerExpenseApproved(
+        expenseId,
+        expense.title,
+        expense.user_id,
+        approverProfile?.name || (isAdmin ? "Admin" : "Engineer"),
+        expenseAmount
+      );
+    } else {
+      // Notify employee that their expense was approved
+      await notifyExpenseApproved(
+        expenseId,
+        expense.title,
+        expense.user_id,
+        approverProfile?.name || (isAdmin ? "Admin" : "Engineer"),
+        expenseAmount
+      );
+    }
 
     return updatedExpense;
   }

@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { UserPlus, Mail, User, Shield, Settings, Sparkles, CheckCircle, AlertCircle, Edit, Trash2, Eye, EyeOff } from "lucide-react";
+import { UserPlus, Mail, User, Shield, Settings, Sparkles, CheckCircle, AlertCircle, Edit, Trash2, Eye, EyeOff, Search } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { z } from "zod";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
@@ -39,7 +39,7 @@ export default function UserManagement() {
   const [loading, setLoading] = useState(false);
   const [listLoading, setListLoading] = useState(false);
   const [engineers, setEngineers] = useState<{ id: string; name: string; email: string }[]>([]);
-  const [users, setUsers] = useState<{ user_id: string; name: string; email: string; balance: number; role: string }[]>([]);
+  const [users, setUsers] = useState<{ user_id: string; name: string; email: string; balance: number; role: string; assigned_engineer_name?: string }[]>([]);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<{ user_id: string; name: string; email: string; balance: number; role: string } | null>(null);
   const [expensesLoading, setExpensesLoading] = useState(false);
@@ -66,6 +66,7 @@ export default function UserManagement() {
   const [updating, setUpdating] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
     // Load engineers for assignment dropdown
@@ -105,10 +106,10 @@ export default function UserManagement() {
     const loadUsers = async () => {
       try {
         setListLoading(true);
-        // fetch profiles
+        // fetch profiles with reporting_engineer_id
         const { data: profiles, error: profilesError } = await supabase
           .from("profiles")
-          .select("user_id, name, email, balance");
+          .select("user_id, name, email, balance, reporting_engineer_id");
         if (profilesError) throw profilesError;
 
         const ids = (profiles || []).map(p => p.user_id);
@@ -122,12 +123,34 @@ export default function UserManagement() {
           (rolesRows || []).forEach(r => { rolesById[r.user_id] = r.role; });
         }
 
+        // Get all engineer IDs that are assigned to employees
+        const engineerIds = [...new Set((profiles || [])
+          .map(p => (p as any).reporting_engineer_id)
+          .filter(id => id !== null && id !== undefined))];
+
+        // Fetch engineer names
+        let engineerNamesById: Record<string, string> = {};
+        if (engineerIds.length > 0) {
+          const { data: engineerProfiles, error: engineerError } = await supabase
+            .from("profiles")
+            .select("user_id, name")
+            .in("user_id", engineerIds);
+          if (!engineerError && engineerProfiles) {
+            engineerProfiles.forEach(ep => {
+              engineerNamesById[ep.user_id] = ep.name;
+            });
+          }
+        }
+
         const combined = (profiles || []).map(p => ({
           user_id: p.user_id,
           name: (p as any).name || "",
           email: (p as any).email || "",
           balance: Number((p as any).balance ?? 0),
           role: rolesById[p.user_id] || "employee",
+          assigned_engineer_name: (p as any).reporting_engineer_id 
+            ? engineerNamesById[(p as any).reporting_engineer_id] || "Unknown"
+            : undefined,
         }));
         setUsers(combined);
       } catch (e) {
@@ -414,7 +437,7 @@ export default function UserManagement() {
           setListLoading(true);
           const { data: profiles, error: profilesError } = await supabase
             .from("profiles")
-            .select("user_id, name, email, balance");
+            .select("user_id, name, email, balance, reporting_engineer_id");
           if (profilesError) throw profilesError;
 
           const ids = (profiles || []).map(p => p.user_id);
@@ -428,12 +451,34 @@ export default function UserManagement() {
             (rolesRows || []).forEach(r => { rolesById[r.user_id] = r.role; });
           }
 
+          // Get all engineer IDs that are assigned to employees
+          const engineerIds = [...new Set((profiles || [])
+            .map(p => (p as any).reporting_engineer_id)
+            .filter(id => id !== null && id !== undefined))];
+
+          // Fetch engineer names
+          let engineerNamesById: Record<string, string> = {};
+          if (engineerIds.length > 0) {
+            const { data: engineerProfiles, error: engineerError } = await supabase
+              .from("profiles")
+              .select("user_id, name")
+              .in("user_id", engineerIds);
+            if (!engineerError && engineerProfiles) {
+              engineerProfiles.forEach(ep => {
+                engineerNamesById[ep.user_id] = ep.name;
+              });
+            }
+          }
+
           const combined = (profiles || []).map(p => ({
             user_id: p.user_id,
             name: (p as any).name || "",
             email: (p as any).email || "",
             balance: Number((p as any).balance ?? 0),
             role: rolesById[p.user_id] || "employee",
+            assigned_engineer_name: (p as any).reporting_engineer_id 
+              ? engineerNamesById[(p as any).reporting_engineer_id] || "Unknown"
+              : undefined,
           }));
           setUsers(combined);
         } catch (e) {
@@ -495,7 +540,7 @@ export default function UserManagement() {
           setListLoading(true);
           const { data: profiles, error: profilesError } = await supabase
             .from("profiles")
-            .select("user_id, name, email, balance");
+            .select("user_id, name, email, balance, reporting_engineer_id");
           if (profilesError) throw profilesError;
 
           const ids = (profiles || []).map(p => p.user_id);
@@ -509,12 +554,34 @@ export default function UserManagement() {
             (rolesRows || []).forEach(r => { rolesById[r.user_id] = r.role; });
           }
 
+          // Get all engineer IDs that are assigned to employees
+          const engineerIds = [...new Set((profiles || [])
+            .map(p => (p as any).reporting_engineer_id)
+            .filter(id => id !== null && id !== undefined))];
+
+          // Fetch engineer names
+          let engineerNamesById: Record<string, string> = {};
+          if (engineerIds.length > 0) {
+            const { data: engineerProfiles, error: engineerError } = await supabase
+              .from("profiles")
+              .select("user_id, name")
+              .in("user_id", engineerIds);
+            if (!engineerError && engineerProfiles) {
+              engineerProfiles.forEach(ep => {
+                engineerNamesById[ep.user_id] = ep.name;
+              });
+            }
+          }
+
           const combined = (profiles || []).map(p => ({
             user_id: p.user_id,
             name: (p as any).name || "",
             email: (p as any).email || "",
             balance: Number((p as any).balance ?? 0),
             role: rolesById[p.user_id] || "employee",
+            assigned_engineer_name: (p as any).reporting_engineer_id 
+              ? engineerNamesById[(p as any).reporting_engineer_id] || "Unknown"
+              : undefined,
           }));
           setUsers(combined);
         } catch (e) {
@@ -573,7 +640,21 @@ export default function UserManagement() {
             <CardTitle className="text-xl font-bold">All Users</CardTitle>
             <CardDescription>Click a user to view full details and expense history</CardDescription>
           </CardHeader>
-          <CardContent className="p-0">
+          <CardContent className="p-6 pt-0">
+            {/* Search Bar */}
+            <div className="mb-4">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Input
+                  placeholder="Search by name or email..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+            </div>
+          </CardContent>
+          <CardContent className="p-0 pt-0">
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
                 <thead className="bg-slate-50 text-left">
@@ -581,6 +662,7 @@ export default function UserManagement() {
                     <th className="px-4 py-3 font-semibold text-slate-700">Name</th>
                     <th className="px-4 py-3 font-semibold text-slate-700">Email</th>
                     <th className="px-4 py-3 font-semibold text-slate-700">Role</th>
+                    <th className="px-4 py-3 font-semibold text-slate-700">Assigned Engineer</th>
                     <th className="px-4 py-3 font-semibold text-slate-700">Balance</th>
                     <th className="px-4 py-3 font-semibold text-slate-700 text-right">Actions</th>
                   </tr>
@@ -588,14 +670,27 @@ export default function UserManagement() {
                 <tbody>
                   {listLoading ? (
                     <tr>
-                      <td className="px-4 py-4" colSpan={5}>Loading users...</td>
+                      <td className="px-4 py-4" colSpan={6}>Loading users...</td>
                     </tr>
                   ) : users.length === 0 ? (
                     <tr>
-                      <td className="px-4 py-4" colSpan={5}>No users found</td>
+                      <td className="px-4 py-4" colSpan={6}>No users found</td>
                     </tr>
-                  ) : (
-                    users.map(u => (
+                  ) : (() => {
+                    const filteredUsers = users.filter(u => {
+                      if (!searchTerm) return true;
+                      const search = searchTerm.toLowerCase();
+                      return (
+                        u.name.toLowerCase().includes(search) ||
+                        u.email.toLowerCase().includes(search)
+                      );
+                    });
+                    return filteredUsers.length === 0 ? (
+                      <tr>
+                        <td className="px-4 py-4" colSpan={6}>No users match your search</td>
+                      </tr>
+                    ) : (
+                      filteredUsers.map(u => (
                       <tr key={u.user_id} className="border-t hover:bg-slate-50">
                         <td className="px-4 py-3">{u.name || "-"}</td>
                         <td className="px-4 py-3">{u.email || "-"}</td>
@@ -603,6 +698,17 @@ export default function UserManagement() {
                           <span className="inline-flex items-center px-2 py-1 rounded bg-slate-100 text-slate-700 text-xs font-medium">
                             {u.role}
                           </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          {u.role === "employee" ? (
+                            u.assigned_engineer_name ? (
+                              <span className="text-slate-700 font-medium">{u.assigned_engineer_name}</span>
+                            ) : (
+                              <span className="text-slate-400 italic">Not assigned</span>
+                            )
+                          ) : (
+                            <span className="text-slate-400">-</span>
+                          )}
                         </td>
                         <td className="px-4 py-3">₹{Number(u.balance ?? 0).toFixed(2)}</td>
                         <td className="px-4 py-3">
@@ -617,8 +723,9 @@ export default function UserManagement() {
                           </div>
                         </td>
                       </tr>
-                    ))
-                  )}
+                      ))
+                    );
+                  })()}
                 </tbody>
               </table>
             </div>

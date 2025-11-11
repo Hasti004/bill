@@ -92,6 +92,7 @@ export default function AdminPanel() {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [dialogOpen, setDialogOpen] = useState(false);
 
   useEffect(() => {
     if (userRole === "admin") {
@@ -206,16 +207,37 @@ export default function AdminPanel() {
   };
 
   const fetchExpenses = async () => {
-    // Admin should only see expenses after engineer verification
-    const { data: expensesData, error: expensesError } = await supabase
+    // Admin should see:
+    // 1. Expenses verified by engineers (status = "verified" or "approved")
+    // 2. Expenses submitted by engineers directly (status = "submitted" AND assigned_engineer_id IS NULL)
+    
+    // Fetch verified/approved expenses
+    const { data: verifiedExpenses, error: verifiedError } = await supabase
       .from("expenses")
       .select("*")
-      .in("status", ["verified", "approved"]) 
+      .in("status", ["verified", "approved"])
       .order("created_at", { ascending: false });
 
-    if (expensesError) {
-      throw expensesError;
+    // Fetch engineer-submitted expenses (submitted with no assigned engineer)
+    const { data: engineerExpenses, error: engineerError } = await supabase
+      .from("expenses")
+      .select("*")
+      .eq("status", "submitted")
+      .is("assigned_engineer_id", null)
+      .order("created_at", { ascending: false });
+
+    if (verifiedError || engineerError) {
+      throw verifiedError || engineerError;
     }
+
+    // Combine and deduplicate expenses
+    const allExpenses = [...(verifiedExpenses || []), ...(engineerExpenses || [])];
+    const uniqueExpenses = Array.from(
+      new Map(allExpenses.map(exp => [exp.id, exp])).values()
+    );
+    const expensesData = uniqueExpenses.sort((a, b) => 
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
 
     if (!expensesData || expensesData.length === 0) {
       setExpenses([]);
@@ -325,6 +347,82 @@ export default function AdminPanel() {
     }
   };
 
+  const verifyExpense = async () => {
+    if (!selectedExpense || !user) return;
+
+    try {
+      // Automatically update status to "verified"
+      const updateData: any = {
+        status: "verified",
+        updated_at: new Date().toISOString()
+      };
+
+      if (adminComment) {
+        updateData.admin_comment = adminComment;
+      }
+
+      const { error } = await supabase
+        .from("expenses")
+        .update(updateData)
+        .eq("id", selectedExpense.id);
+
+      if (error) throw error;
+
+      // Log the action
+      await supabase
+        .from("audit_logs")
+        .insert({
+          expense_id: selectedExpense.id,
+          user_id: user.id,
+          action: "Status changed to verified",
+          comment: adminComment || null
+        });
+
+      toast({
+        title: "Expense Verified",
+        description: "Expense has been verified successfully",
+      });
+
+      // Close dialog and reset
+      setDialogOpen(false);
+      setSelectedExpense(null);
+      setAdminComment("");
+      fetchExpenses();
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Failed to verify expense",
+      });
+    }
+  };
+
+  const approveExpenseDirect = async () => {
+    if (!selectedExpense || !user) return;
+
+    try {
+      // Use ExpenseService to approve (this handles balance deduction)
+      await ExpenseService.approveExpense(selectedExpense.id, user.id, adminComment);
+      
+      toast({
+        title: "Expense Approved",
+        description: `Expense approved and ₹${selectedExpense.total_amount} deducted from employee balance.`,
+      });
+
+      // Close dialog and reset
+      setDialogOpen(false);
+      setSelectedExpense(null);
+      setAdminComment("");
+      fetchExpenses();
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Failed to approve expense",
+      });
+    }
+  };
+
   const updateExpenseStatus = async () => {
     if (!selectedExpense || !selectedStatus || !user) return;
 
@@ -417,6 +515,7 @@ export default function AdminPanel() {
         });
       }
 
+      setDialogOpen(false);
       setSelectedExpense(null);
       setAdminComment("");
       setSelectedStatus("");
@@ -741,22 +840,32 @@ export default function AdminPanel() {
                           {format(new Date(expense.created_at), "MMM d, yyyy")}
                         </TableCell>
                         <TableCell className="text-right">
-                          <Dialog>
-                            <DialogTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setSelectedExpense(expense)}
-                              >
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                            </DialogTrigger>
-                            <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto sm:max-w-3xl md:max-w-4xl">
+                          {expense.status !== "approved" ? (
+                            <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+                              <DialogTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={async () => {
+                                    setSelectedExpense(expense);
+                                    setDialogOpen(true);
+                                    // Fetch attachments when opening dialog
+                                    if (expense.id) {
+                                      const { data: attData } = await supabase
+                                        .from("attachments")
+                                        .select("*")
+                                        .eq("expense_id", expense.id)
+                                        .order("created_at", { ascending: false });
+                                      setAttachments(attData || []);
+                                    }
+                                  }}
+                                >
+                                  <Eye className="h-4 w-4" />
+                                </Button>
+                              </DialogTrigger>
+                              <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto sm:max-w-3xl md:max-w-4xl">
                               <DialogHeader>
-                                <DialogTitle>Expense Details</DialogTitle>
-                                <DialogDescription>
-                                  Review and manage this expense submission
-                                </DialogDescription>
+                                <DialogTitle>Review and manage this expense submission</DialogTitle>
                               </DialogHeader>
                               
                               {selectedExpense && (
@@ -801,35 +910,58 @@ export default function AdminPanel() {
                                     </div>
                                   </div>
 
-                                  <div>
-                                    <label className="text-sm font-medium">Update Status</label>
-                                    <Select 
-                                      value={selectedStatus} 
-                                      onValueChange={setSelectedStatus}
-                                      disabled={selectedExpense.status === 'approved'}
-                                    >
-                                      <SelectTrigger className="mt-1">
-                                        <SelectValue placeholder="Select new status" />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="submitted">Submitted</SelectItem>
-                                        <SelectItem value="verified">Verified</SelectItem>
-                                        <SelectItem value="approved">Approved</SelectItem>
-                                      </SelectContent>
-                                    </Select>
-                                  </div>
+                                  {/* For submitted expenses, show both Verify and Approve buttons */}
+                                  {selectedExpense.status === "submitted" ? (
+                                    <div>
+                                      <label className="text-sm font-medium">Admin Comment (Optional)</label>
+                                      <Textarea
+                                        value={adminComment}
+                                        onChange={(e) => setAdminComment(e.target.value)}
+                                        placeholder="Add a comment about this expense..."
+                                        className="mt-1"
+                                      />
+                                    </div>
+                                  ) : selectedExpense.status === "verified" ? (
+                                    <div>
+                                      <label className="text-sm font-medium">Admin Comment (Optional)</label>
+                                      <Textarea
+                                        value={adminComment}
+                                        onChange={(e) => setAdminComment(e.target.value)}
+                                        placeholder="Add a comment about this expense..."
+                                        className="mt-1"
+                                      />
+                                    </div>
+                                  ) : (
+                                    <>
+                                      <div>
+                                        <label className="text-sm font-medium">Update Status</label>
+                                        <Select 
+                                          value={selectedStatus} 
+                                          onValueChange={setSelectedStatus}
+                                          disabled={selectedExpense.status === 'approved'}
+                                        >
+                                          <SelectTrigger className="mt-1">
+                                            <SelectValue placeholder="Select new status" />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            <SelectItem value="submitted">Submitted</SelectItem>
+                                            <SelectItem value="verified">Verified</SelectItem>
+                                            <SelectItem value="approved">Approved</SelectItem>
+                                          </SelectContent>
+                                        </Select>
+                                      </div>
 
-                                  {/* Assign Engineer section removed - engineer assignment is managed in Users tab or via auto-assignment */}
-
-                                  <div>
-                                    <label className="text-sm font-medium">Admin Comment</label>
-                                    <Textarea
-                                      value={adminComment}
-                                      onChange={(e) => setAdminComment(e.target.value)}
-                                      placeholder="Add a comment about this expense..."
-                                      className="mt-1"
-                                    />
-                                  </div>
+                                      <div>
+                                        <label className="text-sm font-medium">Admin Comment</label>
+                                        <Textarea
+                                          value={adminComment}
+                                          onChange={(e) => setAdminComment(e.target.value)}
+                                          placeholder="Add a comment about this expense..."
+                                          className="mt-1"
+                                        />
+                                      </div>
+                                    </>
+                                  )}
 
                                   {attachments.length > 0 && (
                                     <div className="space-y-2">
@@ -867,26 +999,56 @@ export default function AdminPanel() {
                               )}
 
                               <DialogFooter>
-                                <Button variant="outline" onClick={() => setSelectedExpense(null)}>
+                                <Button variant="outline" onClick={() => {
+                                  setDialogOpen(false);
+                                  setSelectedExpense(null);
+                                  setAdminComment("");
+                                  setSelectedStatus("");
+                                }}>
                                   Cancel
                                 </Button>
-                                <Button 
-                                  onClick={updateExpenseStatus} 
-                                  disabled={!selectedStatus || selectedExpense?.status === 'approved'}
-                                >
-                                  Update Status
-                                </Button>
+                                {selectedExpense?.status === "submitted" ? (
+                                  <>
+                                    <Button variant="outline" onClick={verifyExpense}>
+                                      Verify
+                                    </Button>
+                                    <Button onClick={approveExpenseDirect}>
+                                      Approve
+                                    </Button>
+                                  </>
+                                ) : selectedExpense?.status === "verified" ? (
+                                  <Button onClick={approveExpenseDirect}>
+                                    Approve
+                                  </Button>
+                                ) : (
+                                  <Button 
+                                    onClick={updateExpenseStatus} 
+                                    disabled={!selectedStatus || selectedExpense?.status === 'approved'}
+                                  >
+                                    Update Status
+                                  </Button>
+                                )}
                               </DialogFooter>
+                              </DialogContent>
+                            </Dialog>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled
+                              title="Approved expenses cannot be reviewed"
+                            >
+                              <Eye className="h-4 w-4 opacity-50" />
+                            </Button>
+                          )}
+                          {/* Image Preview Dialog - outside the conditional */}
+                          <Dialog open={imagePreviewOpen} onOpenChange={setImagePreviewOpen}>
+                            <DialogContent className="max-w-3xl">
+                              {imagePreviewUrl && (
+                                <img src={imagePreviewUrl} alt="Attachment preview" className="w-full h-auto rounded" />
+                              )}
                             </DialogContent>
                           </Dialog>
-                        {/* Image Preview Dialog */}
-                        <Dialog open={imagePreviewOpen} onOpenChange={setImagePreviewOpen}>
-                          <DialogContent className="max-w-3xl">
-                            {imagePreviewUrl && (
-                              <img src={imagePreviewUrl} alt="Attachment preview" className="w-full h-auto rounded" />
-                            )}
-                          </DialogContent>
-                        </Dialog>
                         </TableCell>
                       </TableRow>
                     ))}

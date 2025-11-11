@@ -13,13 +13,13 @@ import ExpenseDetail from "./pages/ExpenseDetail";
 import AdminPanel from "./pages/AdminPanel";
 import EngineerReview from "./pages/EngineerReview";
 import Analytics from "./pages/Analytics";
-import ExpenseTemplates from "./pages/ExpenseTemplates";
 import Notifications from "./pages/Notifications";
 import UserManagement from "./pages/UserManagement";
 import NotFound from "./pages/NotFound";
 import Balances from "./pages/Balances";
 import Reports from "./pages/Reports";
 import CategoryManagement from "./pages/CategoryManagement";
+import Settings from "./pages/Settings";
 
 const queryClient = new QueryClient();
 
@@ -35,7 +35,7 @@ const App = () => (
             <Route
               path="/balances"
               element={
-                <ProtectedRoute allowedRoles={["admin", "cashier", "engineer"]}>
+                <ProtectedRoute allowedRoles={["admin", "cashier"]}>
                   <Layout>
                     <Balances />
                   </Layout>
@@ -55,7 +55,7 @@ const App = () => (
             <Route
               path="/expenses"
               element={
-                <ProtectedRoute allowedRoles={["employee", "admin", "cashier"]}>
+                <ProtectedRoute allowedRoles={["employee", "admin", "cashier", "engineer"]}>
                   <Layout>
                     <Expenses />
                   </Layout>
@@ -65,7 +65,7 @@ const App = () => (
             <Route
               path="/expenses/new"
               element={
-                <ProtectedRoute allowedRoles={["employee", "admin", "cashier"]}>
+                <ProtectedRoute allowedRoles={["employee", "admin", "cashier", "engineer"]}>
                   <Layout>
                     <ExpenseForm />
                   </Layout>
@@ -85,7 +85,7 @@ const App = () => (
             <Route
               path="/expenses/:id/edit"
               element={
-                <ProtectedRoute allowedRoles={["employee", "admin", "cashier"]}>
+                <ProtectedRoute allowedRoles={["employee", "admin", "cashier", "engineer"]}>
                   <Layout>
                     <ExpenseForm />
                   </Layout>
@@ -133,6 +133,16 @@ const App = () => (
               }
             />
             <Route
+              path="/settings"
+              element={
+                <ProtectedRoute allowedRoles={["admin"]}>
+                  <Layout>
+                    <Settings />
+                  </Layout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/review"
               element={
                 <ProtectedRoute allowedRoles={["engineer"]}>
@@ -148,16 +158,6 @@ const App = () => (
                 <ProtectedRoute allowedRoles={["employee", "admin", "cashier"]}>
                   <Layout>
                     <Analytics />
-                  </Layout>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/templates"
-              element={
-                <ProtectedRoute allowedRoles={["employee", "admin", "cashier"]}>
-                  <Layout>
-                    <ExpenseTemplates />
                   </Layout>
                 </ProtectedRoute>
               }

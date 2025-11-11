@@ -20,11 +20,11 @@ import { format } from "date-fns";
 
 interface Notification {
   id: string;
-  type: "expense_submitted" | "expense_approved" | "expense_rejected" | "expense_assigned" | "expense_verified";
+  type: "expense_submitted" | "expense_approved" | "expense_rejected" | "expense_assigned" | "expense_verified" | "balance_added";
   title: string;
   message: string;
-  expense_id: string;
-  expense_title: string;
+  expense_id: string | null;
+  expense_title?: string;
   created_at: string;
   read: boolean;
   actor_name?: string;
@@ -51,57 +51,64 @@ export default function Notifications() {
     try {
       setLoading(true);
       
-      // Fetch recent audit logs that represent notifications
-      const { data, error } = await supabase
-        .from("audit_logs")
+      // Fetch notifications from notifications table
+      const { data: notificationsData, error: notificationsError } = await supabase
+        .from("notifications")
         .select(`
           *,
-          profiles!inner(name),
-          expenses!inner(title, user_id)
+          expenses(title)
         `)
-        .or(`expenses.user_id.eq.${user?.id},action.like.%assigned%`)
+        .eq("user_id", user?.id)
         .order("created_at", { ascending: false })
-        .limit(50);
+        .limit(100);
 
-      if (error) throw error;
+      if (notificationsError) throw notificationsError;
 
-      // Convert audit logs to notifications
-      const notificationData = data?.map(log => ({
-        id: log.id,
-        type: getNotificationType(log.action),
-        title: getNotificationTitle(log.action),
-        message: log.comment || getDefaultMessage(log.action),
-        expense_id: log.expense_id,
-        expense_title: log.expenses.title,
-        created_at: log.created_at,
-        read: false, // In a real app, you'd track this in a notifications table
-        actor_name: log.profiles.name
-      })) || [];
+      // Convert to notification format
+      const notificationData = (notificationsData || []).map(notif => ({
+        id: notif.id,
+        type: notif.type as Notification["type"],
+        title: notif.title,
+        message: notif.message,
+        expense_id: notif.expense_id || "",
+        expense_title: notif.expenses?.title || "",
+        created_at: notif.created_at,
+        read: notif.read,
+        actor_name: undefined // Not stored in notifications table
+      }));
 
       setNotifications(notificationData);
       setUnreadCount(notificationData.filter(n => !n.read).length);
     } catch (error) {
       console.error("Error fetching notifications:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to load notifications",
+      });
     } finally {
       setLoading(false);
     }
   };
 
   const setupRealtimeSubscription = () => {
+    if (!user?.id) return;
+
     const channel = supabase
       .channel('notifications')
       .on('postgres_changes', 
         { 
           event: 'INSERT', 
           schema: 'public', 
-          table: 'audit_logs',
-          filter: `expenses.user_id=eq.${user?.id}`
+          table: 'notifications',
+          filter: `user_id=eq.${user.id}`
         }, 
         (payload) => {
           // Handle new notification
+          const newNotif = payload.new as any;
           toast({
-            title: "New Notification",
-            description: "You have a new expense update",
+            title: newNotif.title || "New Notification",
+            description: newNotif.message || "You have a new notification",
           });
           fetchNotifications();
         }
@@ -151,6 +158,8 @@ export default function Notifications() {
         return <Clock className="h-5 w-5 text-blue-600" />;
       case "expense_verified":
         return <AlertCircle className="h-5 w-5 text-yellow-600" />;
+      case "balance_added":
+        return <CheckCircle className="h-5 w-5 text-green-600" />;
       default:
         return <Bell className="h-5 w-5 text-gray-600" />;
     }
@@ -173,20 +182,41 @@ export default function Notifications() {
   };
 
   const markAsRead = async (notificationId: string) => {
-    setNotifications(prev => 
-      prev.map(n => n.id === notificationId ? { ...n, read: true } : n)
-    );
-    setUnreadCount(prev => Math.max(0, prev - 1));
+    // Update in database
+    const { error } = await supabase
+      .from("notifications")
+      .update({ read: true })
+      .eq("id", notificationId);
+
+    if (!error) {
+      setNotifications(prev => 
+        prev.map(n => n.id === notificationId ? { ...n, read: true } : n)
+      );
+      setUnreadCount(prev => Math.max(0, prev - 1));
+    }
   };
 
-  const markAllAsRead = () => {
-    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-    setUnreadCount(0);
+  const markAllAsRead = async () => {
+    if (!user?.id) return;
+
+    // Update all in database
+    const { error } = await supabase
+      .from("notifications")
+      .update({ read: true })
+      .eq("user_id", user.id)
+      .eq("read", false);
+
+    if (!error) {
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+      setUnreadCount(0);
+    }
   };
 
   const handleNotificationClick = (notification: Notification) => {
     markAsRead(notification.id);
-    navigate(`/expenses/${notification.expense_id}`);
+    if (notification.expense_id) {
+      navigate(`/expenses/${notification.expense_id}`);
+    }
   };
 
   const getRecentNotifications = () => {
@@ -320,24 +350,23 @@ export default function Notifications() {
                         {notification.message}
                       </p>
                       <div className="flex items-center justify-between mt-2">
-                        <p className="text-xs text-muted-foreground">
-                          {notification.expense_title}
-                        </p>
+                        {notification.expense_title && (
+                          <p className="text-xs text-muted-foreground">
+                            {notification.expense_title}
+                          </p>
+                        )}
                         <p className="text-xs text-muted-foreground">
                           {format(new Date(notification.created_at), "MMM d, h:mm a")}
                         </p>
                       </div>
-                      {notification.actor_name && (
-                        <p className="text-xs text-muted-foreground mt-1">
-                          by {notification.actor_name}
-                        </p>
-                      )}
                     </div>
-                    <div className="flex-shrink-0">
-                      <Button variant="ghost" size="sm">
-                        <Eye className="h-4 w-4" />
-                      </Button>
-                    </div>
+                    {notification.expense_id && (
+                      <div className="flex-shrink-0">
+                        <Button variant="ghost" size="sm">
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

@@ -6,9 +6,9 @@ import {
   FileText,
   LogOut,
   BarChart3,
-  FileType,
   Bell,
   Tag,
+  Settings as SettingsIcon,
 } from "lucide-react";
 import {
   Sidebar,
@@ -30,17 +30,14 @@ export function AppSidebar() {
   const employeeItems = [
     { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
     { title: "My Expenses", url: "/expenses", icon: Receipt },
-    { title: "Templates", url: "/templates", icon: FileType },
     { title: "Analytics", url: "/analytics", icon: BarChart3 },
     { title: "Notifications", url: "/notifications", icon: Bell },
   ];
 
   const engineerItems = [
     { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
+    { title: "My Expenses", url: "/expenses", icon: Receipt },
     { title: "Review Expenses", url: "/review", icon: FileText },
-    { title: "Balances", url: "/balances", icon: FileText },
-    { title: "Templates", url: "/templates", icon: FileType },
-    { title: "Analytics", url: "/analytics", icon: BarChart3 },
     { title: "Notifications", url: "/notifications", icon: Bell },
   ];
 
@@ -51,10 +48,15 @@ export function AppSidebar() {
     { title: "Manage Users", url: "/admin/users", icon: Users },
     { title: "Categories", url: "/admin/categories", icon: Tag },
     { title: "Reports", url: "/admin/reports", icon: FileText },
-    { title: "Templates", url: "/templates", icon: FileType },
     { title: "Analytics", url: "/analytics", icon: BarChart3 },
+    { title: "Settings", url: "/settings", icon: SettingsIcon },
     { title: "Notifications", url: "/notifications", icon: Bell },
   ];
+
+  // Debug: Log admin items to console
+  if (userRole === "admin") {
+    console.log("Admin items:", adminItems.map(item => item.title));
+  }
 
   const cashierItems = [
     { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
@@ -87,21 +89,20 @@ export function AppSidebar() {
             <SidebarMenu className="px-2 sm:px-0">
               {items.map((item) => (
                 <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild className="h-10 sm:h-9">
-                    <NavLink 
-                      to={item.url}
-                      className={({ isActive }) =>
-                        `flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                          isActive 
-                            ? "bg-sidebar-accent text-sidebar-accent-foreground" 
-                            : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                        }`
+                  <NavLink 
+                    to={item.url}
+                    end={item.url === "/dashboard"}
+                    className={({ isActive }) => {
+                      const baseClasses = "flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors h-10 sm:h-9";
+                      if (isActive) {
+                        return `${baseClasses} bg-gray-200 text-gray-900 font-semibold`;
                       }
-                    >
-                      <item.icon className="h-4 w-4 flex-shrink-0" />
-                      <span className="truncate">{item.title}</span>
-                    </NavLink>
-                  </SidebarMenuButton>
+                      return `${baseClasses} text-sidebar-foreground hover:bg-gray-100 hover:text-gray-900`;
+                    }}
+                  >
+                    <item.icon className="h-4 w-4 flex-shrink-0" />
+                    <span className="truncate">{item.title}</span>
+                  </NavLink>
                 </SidebarMenuItem>
               ))}
             </SidebarMenu>

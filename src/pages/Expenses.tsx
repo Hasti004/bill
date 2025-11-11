@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, Filter, Download, FileType } from "lucide-react";
+import { Plus, Search, Filter, Download } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
@@ -151,10 +151,6 @@ export default function Expenses() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => navigate("/templates")}>
-            <FileType className="mr-2 h-4 w-4" />
-            Templates
-          </Button>
           <Button variant="outline" onClick={exportExpenses}>
             <Download className="mr-2 h-4 w-4" />
             Export
@@ -242,7 +238,7 @@ export default function Expenses() {
                   <TableRow>
                     <TableHead>Title</TableHead>
                     <TableHead>Destination</TableHead>
-                    <TableHead>Travel Dates</TableHead>
+                    <TableHead>Date</TableHead>
                     <TableHead>Amount</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Created</TableHead>
@@ -255,8 +251,7 @@ export default function Expenses() {
                     <TableCell className="font-medium">{expense.title}</TableCell>
                     <TableCell>{expense.destination}</TableCell>
                     <TableCell>
-                      {format(new Date(expense.trip_start), "MMM d")} -{" "}
-                      {format(new Date(expense.trip_end), "MMM d, yyyy")}
+                      {format(new Date(expense.trip_start), "MMM d, yyyy")}
                     </TableCell>
                     <TableCell>{formatINR(expense.total_amount)}</TableCell>
                     <TableCell>

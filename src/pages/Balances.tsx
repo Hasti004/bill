@@ -8,6 +8,11 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { formatINR } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
+import { notifyBalanceAdded } from "@/services/NotificationService";
+import { Search, Users } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 
 interface ProfileRow {
   user_id: string;
@@ -25,8 +30,13 @@ export default function Balances() {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [cashierBalance, setCashierBalance] = useState<number>(0);
   const [addAmounts, setAddAmounts] = useState<{ [key: string]: number }>({});
+  const [searchTerm, setSearchTerm] = useState("");
+  const [bulkAddDialogOpen, setBulkAddDialogOpen] = useState(false);
+  const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set());
+  const [bulkAmount, setBulkAmount] = useState<number>(0);
+  const [bulkAdding, setBulkAdding] = useState(false);
 
-  const canEdit = userRole === "admin" || userRole === "cashier" || userRole === "engineer";
+  const canEdit = userRole === "admin" || userRole === "cashier";
 
   useEffect(() => {
     fetchProfiles();
@@ -47,12 +57,31 @@ export default function Balances() {
       // Fetch roles
       const { data: rolesData, error: rolesError } = await supabase
         .from("user_roles")
-        .select("user_id, role");
+        .select("user_id, role")
+        .order("role", { ascending: true });
       
       if (rolesError) throw rolesError;
       
-      // Create role map
-      const roleMap = new Map(rolesData?.map(r => [r.user_id, r.role]) || []);
+      // Create role map - prioritize admin, cashier, engineer over employee
+      // If user has multiple roles, show the most important one
+      const rolePriority: { [key: string]: number } = {
+        'admin': 4,
+        'cashier': 3,
+        'engineer': 2,
+        'employee': 1
+      };
+      
+      const roleMap = new Map<string, string>();
+      (rolesData || []).forEach((r: any) => {
+        const currentRole = roleMap.get(r.user_id);
+        const currentPriority = currentRole ? (rolePriority[currentRole] || 0) : 0;
+        const newPriority = rolePriority[r.role] || 0;
+        
+        // Keep the role with higher priority
+        if (!currentRole || newPriority > currentPriority) {
+          roleMap.set(r.user_id, r.role);
+        }
+      });
       
       // Combine data
       const combinedData = (profilesData || []).map((r: any) => ({
@@ -160,6 +189,22 @@ export default function Balances() {
       }
       
       console.log('User balance updated successfully:', data);
+      
+      // Get cashier/admin name for notification
+      const { data: adderProfile } = await supabase
+        .from("profiles")
+        .select("name")
+        .eq("user_id", user?.id)
+        .single();
+
+      // Create notification for the user who received the money (both cashier and admin can add)
+      if ((userRole === 'cashier' || userRole === 'admin') && adderProfile) {
+        await notifyBalanceAdded(
+          userId,
+          amountToAdd,
+          adderProfile.name
+        );
+      }
       
       toast({ 
         title: "Amount added", 
@@ -292,17 +337,42 @@ export default function Balances() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Balances</CardTitle>
-          <CardDescription>
-            {userRole === 'cashier' 
-              ? "Add funds to employee accounts. Amount will be deducted from your balance."
-              : userRole === 'admin'
-              ? "Add funds to employee accounts. No deduction from your account."
-              : "Add funds to employee accounts"
-            }
-          </CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Balances</CardTitle>
+              <CardDescription>
+                {userRole === 'cashier' 
+                  ? "Add funds to employee accounts. Amount will be deducted from your balance."
+                  : userRole === 'admin'
+                  ? "Add funds to employee accounts. No deduction from your account."
+                  : "Add funds to employee accounts"
+                }
+              </CardDescription>
+            </div>
+            {userRole === 'admin' && (
+              <Button 
+                onClick={() => setBulkAddDialogOpen(true)}
+                className="flex items-center gap-2"
+              >
+                <Users className="h-4 w-4" />
+                Add to Multiple Users
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
+          {/* Search Bar */}
+          <div className="mb-4">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Input
+                placeholder="Search by name or email..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+          </div>
           {loading ? (
             <p className="text-muted-foreground">Loading...</p>
           ) : (
@@ -318,7 +388,29 @@ export default function Balances() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rows.map((r) => (
+                {rows.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                      No users found
+                    </TableCell>
+                  </TableRow>
+                ) : (() => {
+                  const filteredRows = rows.filter(r => {
+                    if (!searchTerm) return true;
+                    const search = searchTerm.toLowerCase();
+                    return (
+                      r.name.toLowerCase().includes(search) ||
+                      r.email.toLowerCase().includes(search)
+                    );
+                  });
+                  return filteredRows.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                        No users match your search
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredRows.map((r) => (
                   <TableRow key={r.user_id}>
                     <TableCell className="font-medium">{r.name}</TableCell>
                     <TableCell>{r.email}</TableCell>
@@ -365,12 +457,234 @@ export default function Balances() {
                       </Button>
                     </TableCell>
                   </TableRow>
-                ))}
+                    ))
+                  );
+                })()}
               </TableBody>
             </Table>
           )}
         </CardContent>
       </Card>
+
+      {/* Bulk Add Dialog */}
+      <Dialog open={bulkAddDialogOpen} onOpenChange={setBulkAddDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Add Amount to Multiple Users</DialogTitle>
+            <DialogDescription>
+              Select users and enter the amount to add to all selected accounts.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            {/* Amount Input */}
+            <div className="space-y-2">
+              <Label htmlFor="bulk-amount">Amount to Add (INR)</Label>
+              <Input
+                id="bulk-amount"
+                type="number"
+                placeholder="Enter amount"
+                value={bulkAmount || ''}
+                onChange={(e) => setBulkAmount(parseFloat(e.target.value) || 0)}
+                min="0"
+                step="0.01"
+              />
+            </div>
+
+            {/* Select All / Deselect All */}
+            <div className="flex items-center justify-between pb-2 border-b">
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="select-all"
+                  checked={selectedUserIds.size === rows.length && rows.length > 0}
+                  onCheckedChange={(checked) => {
+                    if (checked) {
+                      setSelectedUserIds(new Set(rows.map(r => r.user_id)));
+                    } else {
+                      setSelectedUserIds(new Set());
+                    }
+                  }}
+                />
+                <Label htmlFor="select-all" className="font-medium cursor-pointer">
+                  Select All ({rows.length} users)
+                </Label>
+              </div>
+              <span className="text-sm text-muted-foreground">
+                {selectedUserIds.size} selected
+              </span>
+            </div>
+
+            {/* User List with Checkboxes */}
+            <div className="space-y-2 max-h-96 overflow-y-auto">
+              {rows.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  No users available
+                </p>
+              ) : (
+                rows.map((r) => (
+                  <div key={r.user_id} className="flex items-center space-x-3 p-2 hover:bg-gray-50 rounded-md">
+                    <Checkbox
+                      id={`user-${r.user_id}`}
+                      checked={selectedUserIds.has(r.user_id)}
+                      onCheckedChange={(checked) => {
+                        const newSet = new Set(selectedUserIds);
+                        if (checked) {
+                          newSet.add(r.user_id);
+                        } else {
+                          newSet.delete(r.user_id);
+                        }
+                        setSelectedUserIds(newSet);
+                      }}
+                    />
+                    <Label 
+                      htmlFor={`user-${r.user_id}`} 
+                      className="flex-1 cursor-pointer"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="font-medium">{r.name}</div>
+                          <div className="text-sm text-muted-foreground">{r.email}</div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-sm font-medium">{formatINR(r.balance || 0)}</div>
+                          <Badge variant="outline" className="text-xs mt-1">
+                            {r.role}
+                          </Badge>
+                        </div>
+                      </div>
+                    </Label>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setBulkAddDialogOpen(false);
+                setSelectedUserIds(new Set());
+                setBulkAmount(0);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={async () => {
+                if (selectedUserIds.size === 0) {
+                  toast({
+                    variant: "destructive",
+                    title: "Error",
+                    description: "Please select at least one user",
+                  });
+                  return;
+                }
+                if (bulkAmount <= 0) {
+                  toast({
+                    variant: "destructive",
+                    title: "Error",
+                    description: "Please enter a valid amount greater than 0",
+                  });
+                  return;
+                }
+
+                try {
+                  setBulkAdding(true);
+                  
+                  // Get admin name for notifications
+                  const { data: adminProfile } = await supabase
+                    .from("profiles")
+                    .select("name")
+                    .eq("user_id", user?.id)
+                    .single();
+
+                  const userIds = Array.from(selectedUserIds);
+                  let successCount = 0;
+                  let errorCount = 0;
+
+                  // Add amount to each selected user
+                  for (const userId of userIds) {
+                    try {
+                      const userRow = rows.find(r => r.user_id === userId);
+                      if (!userRow) continue;
+
+                      const currentBalance = userRow.balance || 0;
+                      const newBalance = currentBalance + bulkAmount;
+
+                      // Update balance in database
+                      const { error: updateError } = await supabase
+                        .from("profiles")
+                        .update({ balance: newBalance })
+                        .eq("user_id", userId);
+
+                      if (updateError) throw updateError;
+
+                      // Send notification
+                      if (adminProfile) {
+                        await notifyBalanceAdded(
+                          userId,
+                          bulkAmount,
+                          adminProfile.name
+                        );
+                      }
+
+                      successCount++;
+                    } catch (error) {
+                      console.error(`Error adding amount to user ${userId}:`, error);
+                      errorCount++;
+                    }
+                  }
+
+                  // Update local state
+                  setRows(prev => prev.map(r => {
+                    if (selectedUserIds.has(r.user_id)) {
+                      return { ...r, balance: (r.balance || 0) + bulkAmount };
+                    }
+                    return r;
+                  }));
+
+                  // Show success/error message
+                  if (errorCount === 0) {
+                    toast({
+                      title: "Success",
+                      description: `Added ${formatINR(bulkAmount)} to ${successCount} user(s)`,
+                    });
+                  } else {
+                    toast({
+                      variant: "destructive",
+                      title: "Partial Success",
+                      description: `Added amount to ${successCount} user(s), ${errorCount} failed`,
+                    });
+                  }
+
+                  // Close dialog and reset
+                  setBulkAddDialogOpen(false);
+                  setSelectedUserIds(new Set());
+                  setBulkAmount(0);
+                } catch (error: any) {
+                  console.error("Error in bulk add:", error);
+                  toast({
+                    variant: "destructive",
+                    title: "Error",
+                    description: error.message || "Failed to add amount to users",
+                  });
+                } finally {
+                  setBulkAdding(false);
+                }
+              }}
+              disabled={bulkAdding || selectedUserIds.size === 0 || bulkAmount <= 0}
+            >
+              {bulkAdding 
+                ? "Adding..." 
+                : bulkAmount > 0 && selectedUserIds.size > 0
+                  ? `Add ${formatINR(bulkAmount)} to ${selectedUserIds.size} User(s)`
+                  : "Add to Selected Users"
+              }
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
    
       
       <div className="text-sm text-muted-foreground">
