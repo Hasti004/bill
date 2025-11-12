@@ -4,6 +4,7 @@ export type NotificationType =
   | "expense_verified" 
   | "expense_approved" 
   | "expense_submitted" 
+  | "expense_rejected"
   | "balance_added";
 
 interface CreateNotificationParams {
@@ -19,7 +20,8 @@ interface CreateNotificationParams {
  */
 export async function createNotification(params: CreateNotificationParams): Promise<void> {
   try {
-    const { error } = await supabase
+    // @ts-ignore - notifications table exists but not in types
+    const { error } = await (supabase as any)
       .from("notifications")
       .insert({
         user_id: params.userId,
@@ -123,8 +125,8 @@ export async function notifyBalanceAdded(
   await createNotification({
     userId,
     type: "balance_added",
-    title: "Balance Added",
-    message: `${cashierName} has added ₹${amount.toFixed(2)} to your account`,
+    title: "Balance Updated",
+    message: `Your balance has been updated. ₹${amount.toFixed(2)} has been added to your account by ${cashierName}`,
   });
 }
 
@@ -145,5 +147,50 @@ export async function notifyEngineerExpenseApproved(
     message: `Your expense "${expenseTitle}" (₹${amount.toFixed(2)}) has been approved by ${adminName}`,
     expenseId,
   });
+}
+
+/**
+ * Create notification when expense is rejected
+ */
+export async function notifyExpenseRejected(
+  expenseId: string,
+  expenseTitle: string,
+  employeeUserId: string,
+  rejectorName: string,
+  comment?: string
+): Promise<void> {
+  await createNotification({
+    userId: employeeUserId,
+    type: "expense_rejected",
+    title: "Expense Rejected",
+    message: `Your expense "${expenseTitle}" has been rejected by ${rejectorName}${comment ? `. Reason: ${comment}` : ''}`,
+    expenseId,
+  });
+}
+
+/**
+ * Create notification when expense is verified above threshold (notify admins)
+ */
+export async function notifyExpenseVerifiedToAdmin(
+  expenseId: string,
+  expenseTitle: string,
+  employeeName: string,
+  engineerName: string,
+  amount: number,
+  adminUserIds: string[]
+): Promise<void> {
+  if (adminUserIds.length === 0) return;
+  
+  const notifications = adminUserIds.map(adminId =>
+    createNotification({
+      userId: adminId,
+      type: "expense_submitted",
+      title: "Expense Verified - Awaiting Approval",
+      message: `${engineerName} has verified "${expenseTitle}" (₹${amount.toFixed(2)}) from ${employeeName}. Please review and approve.`,
+      expenseId,
+    })
+  );
+  
+  await Promise.all(notifications);
 }
 

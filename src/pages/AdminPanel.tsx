@@ -93,6 +93,7 @@ export default function AdminPanel() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [reviewLoading, setReviewLoading] = useState(false);
 
   useEffect(() => {
     if (userRole === "admin") {
@@ -210,6 +211,7 @@ export default function AdminPanel() {
     // Admin should see:
     // 1. Expenses verified by engineers (status = "verified" or "approved")
     // 2. Expenses submitted by engineers directly (status = "submitted" AND assigned_engineer_id IS NULL)
+    // 3. Expenses rejected by this admin (status = "rejected" AND rejected by current admin)
     
     // Fetch verified/approved expenses
     const { data: verifiedExpenses, error: verifiedError } = await supabase
@@ -226,12 +228,35 @@ export default function AdminPanel() {
       .is("assigned_engineer_id", null)
       .order("created_at", { ascending: false });
 
+    // Fetch expenses rejected by this admin from audit_logs
+    const { data: rejectedLogs, error: rejectedLogsError } = await supabase
+      .from("audit_logs")
+      .select("expense_id")
+      .eq("user_id", user?.id)
+      .eq("action", "expense_rejected");
+
     if (verifiedError || engineerError) {
       throw verifiedError || engineerError;
     }
 
+    let rejectedExpenses: any[] = [];
+    if (!rejectedLogsError && rejectedLogs && rejectedLogs.length > 0) {
+      const rejectedExpenseIds = rejectedLogs.map(log => log.expense_id);
+      
+      const { data: rejectedData, error: rejectedError } = await supabase
+        .from("expenses")
+        .select("*")
+        .eq("status", "rejected")
+        .in("id", rejectedExpenseIds)
+        .order("created_at", { ascending: false });
+
+      if (!rejectedError && rejectedData) {
+        rejectedExpenses = rejectedData;
+      }
+    }
+
     // Combine and deduplicate expenses
-    const allExpenses = [...(verifiedExpenses || []), ...(engineerExpenses || [])];
+    const allExpenses = [...(verifiedExpenses || []), ...(engineerExpenses || []), ...rejectedExpenses];
     const uniqueExpenses = Array.from(
       new Map(allExpenses.map(exp => [exp.id, exp])).values()
     );
@@ -394,6 +419,36 @@ export default function AdminPanel() {
         title: "Error",
         description: error.message || "Failed to verify expense",
       });
+    }
+  };
+
+  const rejectExpense = async () => {
+    if (!selectedExpense || !user) return;
+
+    try {
+      setReviewLoading(true);
+
+      await ExpenseService.rejectExpense(selectedExpense.id, user.id, adminComment);
+
+      toast({
+        title: "Expense Rejected",
+        description: "Expense has been rejected successfully",
+      });
+
+      setSelectedExpense(null);
+      setAdminComment("");
+      setAttachments([]);
+      setDialogOpen(false);
+      fetchExpenses();
+    } catch (error: any) {
+      console.error("Error rejecting expense:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Failed to reject expense",
+      });
+    } finally {
+      setReviewLoading(false);
     }
   };
 
@@ -758,6 +813,7 @@ export default function AdminPanel() {
                       <SelectItem value="submitted">Submitted</SelectItem>
                       <SelectItem value="verified">Verified</SelectItem>
                       <SelectItem value="approved">Approved</SelectItem>
+                      <SelectItem value="rejected">Rejected</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -840,7 +896,16 @@ export default function AdminPanel() {
                           {format(new Date(expense.created_at), "MMM d, yyyy")}
                         </TableCell>
                         <TableCell className="text-right">
-                          {expense.status !== "approved" ? (
+                          {expense.status === "approved" || expense.status === "rejected" ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled
+                              title={expense.status === "approved" ? "Expense is already approved" : "Expense is rejected"}
+                            >
+                              <Eye className="h-4 w-4 opacity-50" />
+                            </Button>
+                          ) : (
                             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
                               <DialogTrigger asChild>
                                 <Button
@@ -1007,8 +1072,18 @@ export default function AdminPanel() {
                                 }}>
                                   Cancel
                                 </Button>
-                                {selectedExpense?.status === "submitted" ? (
+                                {selectedExpense?.status === "rejected" ? (
+                                  // No action buttons for rejected expenses - they are final
+                                  null
+                                ) : selectedExpense?.status === "submitted" ? (
                                   <>
+                                    <Button 
+                                      variant="destructive" 
+                                      onClick={rejectExpense}
+                                      disabled={reviewLoading || selectedExpense?.status === 'approved' || selectedExpense?.status === 'rejected'}
+                                    >
+                                      Reject
+                                    </Button>
                                     <Button variant="outline" onClick={verifyExpense}>
                                       Verify
                                     </Button>
@@ -1017,9 +1092,18 @@ export default function AdminPanel() {
                                     </Button>
                                   </>
                                 ) : selectedExpense?.status === "verified" ? (
-                                  <Button onClick={approveExpenseDirect}>
-                                    Approve
-                                  </Button>
+                                  <>
+                                    <Button 
+                                      variant="destructive" 
+                                      onClick={rejectExpense}
+                                      disabled={reviewLoading || selectedExpense?.status === 'approved' || selectedExpense?.status === 'rejected'}
+                                    >
+                                      Reject
+                                    </Button>
+                                    <Button onClick={approveExpenseDirect}>
+                                      Approve
+                                    </Button>
+                                  </>
                                 ) : (
                                   <Button 
                                     onClick={updateExpenseStatus} 
@@ -1031,15 +1115,6 @@ export default function AdminPanel() {
                               </DialogFooter>
                               </DialogContent>
                             </Dialog>
-                          ) : (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              disabled
-                              title="Approved expenses cannot be reviewed"
-                            >
-                              <Eye className="h-4 w-4 opacity-50" />
-                            </Button>
                           )}
                           {/* Image Preview Dialog - outside the conditional */}
                           <Dialog open={imagePreviewOpen} onOpenChange={setImagePreviewOpen}>

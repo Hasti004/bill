@@ -328,44 +328,23 @@ export default function ExpenseForm() {
   };
 
   return (
-    <div className="space-y-4 sm:space-y-6 lg:space-y-8">
-      {/* Mobile-optimized Header */}
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
-        <div className="min-w-0">
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
-            {isEditing ? "Edit Expense" : "New Expense"}
-          </h1>
-          <p className="text-sm sm:text-base text-muted-foreground">
-            {isEditing ? "Update your expense details" : "Create a new expense claim"}
-          </p>
-        </div>
-        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-          <Button
-            variant="outline"
-            onClick={() => navigate("/expenses")}
-            disabled={loading}
-            className="w-full sm:w-auto"
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={() => saveExpense()}
-            disabled={loading}
-            className="w-full sm:w-auto"
-          >
-            <Send className="mr-2 h-4 w-4" />
-            <span className="hidden sm:inline">Submit</span>
-            <span className="sm:hidden">Submit</span>
-          </Button>
-        </div>
+    <div className="space-y-4 sm:space-y-6 lg:space-y-8 max-w-4xl mx-auto">
+      {/* Center-aligned Header */}
+      <div className="text-center">
+        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
+          {isEditing ? "Edit Expense" : "New Expense"}
+        </h1>
+        <p className="text-sm sm:text-base text-muted-foreground mt-2">
+          {isEditing ? "Update your expense details" : "Create a new expense claim"}
+        </p>
       </div>
 
-      <div className="grid gap-4 sm:gap-6 grid-cols-1 lg:grid-cols-2">
+      <div className="flex justify-center">
         {/* Expense Details */}
-        <Card>
+        <Card className="w-full max-w-2xl">
           <CardHeader>
-            <CardTitle>Expense Details</CardTitle>
-            <CardDescription>Basic information about your expense</CardDescription>
+            <CardTitle className="text-center">Expense Details</CardTitle>
+            <CardDescription className="text-center">Basic information about your expense</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
@@ -471,8 +450,8 @@ export default function ExpenseForm() {
       </div>
 
       {/* File Upload Section - Required for Submission */}
-      <div className="mt-8">
-        <Card>
+      <div className="mt-8 flex justify-center">
+        <Card className="w-full max-w-2xl">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               Bill Photos
@@ -514,6 +493,26 @@ export default function ExpenseForm() {
             )}
           </CardContent>
         </Card>
+      </div>
+
+      {/* Submit and Cancel Buttons - Full Width, Center-aligned */}
+      <div className="flex flex-col gap-2 w-full max-w-2xl mx-auto">
+        <Button
+          onClick={() => saveExpense()}
+          disabled={loading}
+          className="w-full"
+        >
+          <Send className="mr-2 h-4 w-4" />
+          Submit
+        </Button>
+        <Button
+          variant="outline"
+          onClick={() => navigate("/expenses")}
+          disabled={loading}
+          className="w-full"
+        >
+          Cancel
+        </Button>
       </div>
 
       {AddCategoryDialog}

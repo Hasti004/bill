@@ -4,7 +4,9 @@ import {
   notifyExpenseVerified, 
   notifyExpenseApproved, 
   notifyExpenseSubmitted,
-  notifyEngineerExpenseApproved
+  notifyEngineerExpenseApproved,
+  notifyExpenseRejected,
+  notifyExpenseVerifiedToAdmin
 } from "./NotificationService";
 
 type Expense = Database["public"]["Tables"]["expenses"]["Row"];
@@ -400,7 +402,7 @@ export class ExpenseService {
     // Get expense details and employee info for notification
     const { data: expenseData, error: expenseFetchError } = await supabase
       .from("expenses")
-      .select("title, user_id")
+      .select("title, user_id, total_amount")
       .eq("id", expenseId)
       .single();
 
@@ -412,6 +414,13 @@ export class ExpenseService {
         .eq("user_id", engineerId)
         .single();
 
+      // Get employee name
+      const { data: employeeProfile } = await supabase
+        .from("profiles")
+        .select("name")
+        .eq("user_id", expenseData.user_id)
+        .single();
+
       // Create notification for employee
       await notifyExpenseVerified(
         expenseId,
@@ -419,6 +428,38 @@ export class ExpenseService {
         expenseData.user_id,
         engineerProfile?.name || "Engineer"
       );
+
+      // Check if expense is above threshold - if so, notify admins
+      // @ts-ignore - settings table exists but not in types
+      const { data: limitSetting } = await supabase
+        .from("settings")
+        .select("value")
+        .eq("key", "engineer_approval_limit")
+        .maybeSingle();
+      
+      const approvalLimit = limitSetting ? parseFloat((limitSetting as any).value) : 50000;
+      const expenseAmount = Number(expenseData.total_amount);
+      
+      // If expense is at or above threshold, notify all admins
+      if (expenseAmount >= approvalLimit) {
+        const { data: adminRoles } = await supabase
+          .from("user_roles")
+          .select("user_id")
+          .eq("role", "admin");
+        
+        const adminUserIds = adminRoles?.map(r => r.user_id) || [];
+        
+        if (adminUserIds.length > 0) {
+          await notifyExpenseVerifiedToAdmin(
+            expenseId,
+            expenseData.title,
+            employeeProfile?.name || "Employee",
+            engineerProfile?.name || "Engineer",
+            expenseAmount,
+            adminUserIds
+          );
+        }
+      }
     }
 
     return updatedExpense;
@@ -458,6 +499,41 @@ export class ExpenseService {
     if (isEngineer && expense.status !== "submitted") {
       throw new Error("Engineers can only approve submitted expenses");
     }
+    
+    // Check engineer approval limit if engineer is trying to approve
+    if (isEngineer) {
+      // @ts-ignore - settings table exists but not in types
+      const { data: limitSetting, error: limitError } = await supabase
+        .from("settings")
+        .select("value")
+        .eq("key", "engineer_approval_limit")
+        .maybeSingle();
+      
+      if (limitError) {
+        console.error("Error fetching engineer approval limit:", limitError);
+        throw new Error("Unable to verify approval limit. Please contact administrator.");
+      }
+      
+      const approvalLimit = limitSetting ? parseFloat((limitSetting as any).value) : 50000; // Default to 50000 if not set
+      const expenseAmount = Number(expense.total_amount);
+      
+      console.log("Engineer approval check:", { 
+        expenseAmount, 
+        approvalLimit, 
+        exceeds: expenseAmount > approvalLimit,
+        expenseId: expense.id
+      });
+      
+      // Engineers can only approve if expense amount <= limit
+      // If expense amount > limit, they must verify instead
+      if (expenseAmount > approvalLimit) {
+        throw new Error(
+          `This expense (₹${expenseAmount.toFixed(2)}) exceeds the engineer approval limit of ₹${approvalLimit.toFixed(2)}. ` +
+          `Please verify this expense instead. It will be sent to admin for final approval.`
+        );
+      }
+    }
+    
     if (isAdmin && expense.status !== "submitted" && expense.status !== "verified") {
       throw new Error("Admins can only approve submitted or verified expenses");
     }
@@ -588,17 +664,43 @@ export class ExpenseService {
   }
 
   /**
-   * Reject expense (admin action)
+   * Reject expense (admin or engineer action)
    */
   static async rejectExpense(
     expenseId: string,
-    adminId: string,
+    rejectorId: string,
     comment?: string
   ): Promise<Expense> {
-    // Check if admin has permission
-    const isAdmin = await this.hasRole(adminId, "admin");
-    if (!isAdmin) {
-      throw new Error("Only administrators can reject expenses");
+    // Check if rejector has permission (admin or engineer)
+    const isAdmin = await this.hasRole(rejectorId, "admin");
+    const isEngineer = await this.hasRole(rejectorId, "engineer");
+    if (!isAdmin && !isEngineer) {
+      throw new Error("Only administrators or engineers can reject expenses");
+    }
+
+    // Fetch expense to check status and get user_id
+    const { data: expense, error: fetchError } = await supabase
+      .from("expenses")
+      .select("id, user_id, title, status")
+      .eq("id", expenseId)
+      .single();
+
+    if (fetchError) throw fetchError;
+
+    // Check if expense can be rejected (not already approved or rejected)
+    if (expense.status === "approved") {
+      throw new Error("Approved expenses cannot be rejected");
+    }
+    if (expense.status === "rejected") {
+      throw new Error("This expense is already rejected");
+    }
+
+    // For engineers, check if they can review this expense
+    if (isEngineer) {
+      const canReview = await this.canEngineerReviewExpense(expenseId, rejectorId);
+      if (!canReview) {
+        throw new Error("You don't have permission to reject this expense");
+      }
     }
 
     // Update expense
@@ -616,7 +718,23 @@ export class ExpenseService {
     if (updateError) throw updateError;
 
     // Log the action
-    await this.logAction(expenseId, adminId, "expense_rejected", comment);
+    await this.logAction(expenseId, rejectorId, "expense_rejected", comment);
+
+    // Get rejector name for notification
+    const { data: rejectorProfile } = await supabase
+      .from("profiles")
+      .select("name")
+      .eq("user_id", rejectorId)
+      .single();
+
+    // Send notification to expense owner
+    await notifyExpenseRejected(
+      expenseId,
+      expense.title,
+      expense.user_id,
+      rejectorProfile?.name || (isAdmin ? "Admin" : "Engineer"),
+      comment
+    );
 
     return updatedExpense;
   }

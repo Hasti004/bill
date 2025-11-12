@@ -20,6 +20,7 @@ import Balances from "./pages/Balances";
 import Reports from "./pages/Reports";
 import CategoryManagement from "./pages/CategoryManagement";
 import Settings from "./pages/Settings";
+import NotificationSettings from "./pages/NotificationSettings";
 
 const queryClient = new QueryClient();
 
@@ -28,7 +29,7 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <BrowserRouter>
+      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/auth" element={<Auth />} />
@@ -135,7 +136,17 @@ const App = () => (
             <Route
               path="/settings"
               element={
-                <ProtectedRoute allowedRoles={["admin"]}>
+                <ProtectedRoute allowedRoles={["employee", "admin", "engineer", "cashier"]}>
+                  <Layout>
+                    <Settings />
+                  </Layout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/notification-settings"
+              element={
+                <ProtectedRoute allowedRoles={["employee", "admin", "engineer", "cashier"]}>
                   <Layout>
                     <Settings />
                   </Layout>
@@ -168,6 +179,16 @@ const App = () => (
                 <ProtectedRoute allowedRoles={["employee", "admin", "engineer", "cashier"]}>
                   <Layout>
                     <Notifications />
+                  </Layout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/notification-settings"
+              element={
+                <ProtectedRoute allowedRoles={["employee", "admin", "engineer", "cashier"]}>
+                  <Layout>
+                    <NotificationSettings />
                   </Layout>
                 </ProtectedRoute>
               }

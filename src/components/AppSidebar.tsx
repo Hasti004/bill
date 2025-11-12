@@ -32,6 +32,7 @@ export function AppSidebar() {
     { title: "My Expenses", url: "/expenses", icon: Receipt },
     { title: "Analytics", url: "/analytics", icon: BarChart3 },
     { title: "Notifications", url: "/notifications", icon: Bell },
+    { title: "Settings", url: "/settings", icon: SettingsIcon },
   ];
 
   const engineerItems = [
@@ -39,6 +40,7 @@ export function AppSidebar() {
     { title: "My Expenses", url: "/expenses", icon: Receipt },
     { title: "Review Expenses", url: "/review", icon: FileText },
     { title: "Notifications", url: "/notifications", icon: Bell },
+    { title: "Settings", url: "/settings", icon: SettingsIcon },
   ];
 
   const adminItems = [
@@ -49,14 +51,10 @@ export function AppSidebar() {
     { title: "Categories", url: "/admin/categories", icon: Tag },
     { title: "Reports", url: "/admin/reports", icon: FileText },
     { title: "Analytics", url: "/analytics", icon: BarChart3 },
-    { title: "Settings", url: "/settings", icon: SettingsIcon },
     { title: "Notifications", url: "/notifications", icon: Bell },
+    { title: "Settings", url: "/settings", icon: SettingsIcon },
   ];
 
-  // Debug: Log admin items to console
-  if (userRole === "admin") {
-    console.log("Admin items:", adminItems.map(item => item.title));
-  }
 
   const cashierItems = [
     { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
@@ -64,6 +62,7 @@ export function AppSidebar() {
     { title: "Balances", url: "/balances", icon: FileText },
     { title: "Analytics", url: "/analytics", icon: BarChart3 },
     { title: "Notifications", url: "/notifications", icon: Bell },
+    { title: "Settings", url: "/settings", icon: SettingsIcon },
   ];
 
   const items = 

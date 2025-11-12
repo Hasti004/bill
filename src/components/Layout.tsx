@@ -12,6 +12,8 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Separator } from "@/components/ui/separator";
+import { useNotificationManager } from "@/hooks/useNotificationManager";
+import { NotificationPopup } from "@/components/NotificationPopup";
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const { userProfile, userRole, user, refreshUserProfile } = useAuth();
@@ -27,6 +29,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
+  
+  const { activeNotifications, removeNotification, handleViewNotification } = useNotificationManager();
   
   const getInitials = (name: string) => {
     return name
@@ -77,9 +81,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
     <SidebarProvider>
       <div className="min-h-screen flex w-full bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100">
         <AppSidebar />
-        <main className="flex-1 flex flex-col min-w-0">
+        <main className="flex-1 flex flex-col min-w-0 relative">
           {/* Mobile-optimized Header */}
-          <header className="border-b bg-white/80 backdrop-blur-md supports-[backdrop-filter]:bg-white/60 shadow-sm sticky top-0 z-40">
+          <header className="border-b bg-white/80 backdrop-blur-md supports-[backdrop-filter]:bg-white/60 shadow-sm sticky top-0 z-30">
             <div className="flex h-14 sm:h-16 items-center gap-2 sm:gap-4 px-3 sm:px-6">
               <SidebarTrigger className="hover:bg-gray-100 rounded-lg p-2 transition-colors flex-shrink-0" />
               <div className="flex-1 min-w-0">
@@ -398,6 +402,23 @@ export function Layout({ children }: { children: React.ReactNode }) {
             </SheetContent>
           </Sheet>
         </main>
+        
+        {/* Notification Popups */}
+        <div className="fixed bottom-4 right-4 z-50 flex flex-col-reverse gap-2">
+          {activeNotifications.map((notification, index) => (
+            <NotificationPopup
+              key={notification.id}
+              id={notification.id}
+              type={notification.type}
+              title={notification.title}
+              message={notification.message}
+              expenseId={notification.expense_id}
+              createdAt={notification.created_at}
+              onClose={() => removeNotification(notification.id)}
+              onView={() => handleViewNotification(notification.expense_id)}
+            />
+          ))}
+        </div>
       </div>
     </SidebarProvider>
   );

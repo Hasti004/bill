@@ -22,13 +22,17 @@ import {
   DollarSign,
   Eye,
   FileText,
-  User
+  User,
+  Search,
+  Calendar
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { ExpenseService } from "@/services/ExpenseService";
-import { format } from "date-fns";
+import { format, subDays, subMonths, subYears } from "date-fns";
 import { StatusBadge } from "@/components/StatusBadge";
 import { formatINR } from "@/lib/format";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 
 interface Expense {
   id: string;
@@ -78,17 +82,33 @@ export default function EngineerReview() {
   const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [engineerApprovalLimit, setEngineerApprovalLimit] = useState<number>(50000);
+  const [timePeriod, setTimePeriod] = useState<string>("all");
+  const [searchTerm, setSearchTerm] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [sortOrder, setSortOrder] = useState<string>("desc");
+  const [allExpenses, setAllExpenses] = useState<Expense[]>([]);
 
   useEffect(() => {
     if (userRole === "engineer") {
       fetchEngineerApprovalLimit();
-      fetchAssignedExpenses();
     }
   }, [userRole, user]);
 
+  useEffect(() => {
+    if (userRole === "engineer") {
+      fetchAssignedExpenses();
+    }
+  }, [userRole, user, timePeriod]);
+
+  useEffect(() => {
+    // Apply filters when any filter changes
+    applyFilters(allExpenses);
+  }, [searchTerm, statusFilter, sortOrder, allExpenses]);
+
   const fetchEngineerApprovalLimit = async () => {
     try {
-      const { data, error } = await supabase
+      // @ts-ignore - settings table exists but not in types
+      const { data, error } = await (supabase as any)
         .from("settings")
         .select("value")
         .eq("key", "engineer_approval_limit")
@@ -96,14 +116,33 @@ export default function EngineerReview() {
 
       if (error) {
         console.error("Error fetching approval limit:", error);
+        console.error("Error details:", {
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint
+        });
+        // Use default if there's an error
+        setEngineerApprovalLimit(50000);
         return;
       }
 
       if (data) {
-        setEngineerApprovalLimit(parseFloat(data.value) || 50000);
+        const limitValue = parseFloat((data as any).value);
+        if (isNaN(limitValue)) {
+          console.error("Invalid limit value:", (data as any).value);
+          setEngineerApprovalLimit(50000);
+        } else {
+          setEngineerApprovalLimit(limitValue);
+          console.log("Engineer approval limit loaded:", limitValue);
+        }
+      } else {
+        console.warn("No limit data found, using default 50000");
+        setEngineerApprovalLimit(50000);
       }
     } catch (error) {
       console.error("Error fetching approval limit:", error);
+      setEngineerApprovalLimit(50000);
     }
   };
 
@@ -111,23 +150,87 @@ export default function EngineerReview() {
     try {
       setLoading(true);
       
-      // 1) Fetch expenses assigned to engineer without implicit join
-      const { data: expenses, error: expensesError } = await supabase
+      // Calculate date filter based on time period
+      let dateFilter: Date | null = null;
+      if (timePeriod === "week") {
+        dateFilter = subDays(new Date(), 7);
+      } else if (timePeriod === "month") {
+        dateFilter = subMonths(new Date(), 1);
+      } else if (timePeriod === "year") {
+        dateFilter = subYears(new Date(), 1);
+      }
+
+      // Build query - include all statuses (submitted, verified, approved, rejected)
+      let query = supabase
         .from("expenses")
         .select("*")
         .eq("assigned_engineer_id", user?.id)
-        .in("status", ["submitted", "verified"])
+        .in("status", ["submitted", "verified", "approved", "rejected"]);
+
+      // Apply date filter if time period is selected
+      if (dateFilter) {
+        query = query.gte("created_at", dateFilter.toISOString());
+      }
+
+      const { data: expenses, error: expensesError } = await query
         .order("created_at", { ascending: false });
 
       if (expensesError) throw expensesError;
 
-      if (!expenses || expenses.length === 0) {
+      // Fetch expenses rejected by this engineer from audit_logs
+      const { data: rejectedLogs, error: rejectedLogsError } = await supabase
+        .from("audit_logs")
+        .select("expense_id")
+        .eq("user_id", user?.id)
+        .eq("action", "expense_rejected");
+
+      if (rejectedLogsError) {
+        console.error("Error fetching rejected expenses logs:", rejectedLogsError);
+      }
+
+      let rejectedExpenseIds: string[] = [];
+      if (rejectedLogs && rejectedLogs.length > 0) {
+        rejectedExpenseIds = rejectedLogs.map(log => log.expense_id);
+      }
+
+      // Fetch rejected expenses that were rejected by this engineer
+      let rejectedExpenses: any[] = [];
+      if (rejectedExpenseIds.length > 0) {
+        let rejectedQuery = supabase
+          .from("expenses")
+          .select("*")
+          .eq("assigned_engineer_id", user?.id)
+          .eq("status", "rejected")
+          .in("id", rejectedExpenseIds);
+
+        if (dateFilter) {
+          rejectedQuery = rejectedQuery.gte("created_at", dateFilter.toISOString());
+        }
+
+        const { data: rejectedData, error: rejectedError } = await rejectedQuery
+          .order("created_at", { ascending: false });
+
+        if (!rejectedError && rejectedData) {
+          rejectedExpenses = rejectedData;
+        }
+      }
+
+      // Combine all expenses (submitted, verified, approved, and rejected by this engineer)
+      const allExpensesData = [...(expenses || []), ...rejectedExpenses];
+      
+      // Remove duplicates
+      const uniqueExpenses = Array.from(
+        new Map(allExpensesData.map(exp => [exp.id, exp])).values()
+      );
+
+      if (uniqueExpenses.length === 0) {
+        setAllExpenses([]);
         setExpenses([]);
         return;
       }
 
       // 2) Fetch related profiles separately and merge client-side
-      const userIds = [...new Set(expenses.map(e => e.user_id))];
+      const userIds = [...new Set(uniqueExpenses.map(e => e.user_id))];
       const { data: profiles, error: profilesError } = await supabase
         .from("profiles")
         .select("user_id, name, email")
@@ -135,7 +238,7 @@ export default function EngineerReview() {
 
       if (profilesError) throw profilesError;
 
-      const merged = expenses.map(expense => {
+      const merged = uniqueExpenses.map(expense => {
         const profile = profiles?.find(p => p.user_id === expense.user_id);
         return {
           ...expense,
@@ -145,12 +248,45 @@ export default function EngineerReview() {
         } as any;
       });
 
-      setExpenses(merged);
+      setAllExpenses(merged);
+      
+      // Apply search filter
+      applyFilters(merged);
     } catch (error) {
       console.error("Error fetching assigned expenses:", error);
     } finally {
       setLoading(false);
     }
+  };
+
+  const applyFilters = (expensesList: Expense[]) => {
+    let filtered = expensesList;
+
+    // Apply search filter
+    if (searchTerm) {
+      const search = searchTerm.toLowerCase();
+      filtered = filtered.filter(exp => 
+        exp.title?.toLowerCase().includes(search) ||
+        exp.destination?.toLowerCase().includes(search) ||
+        exp.user_name?.toLowerCase().includes(search) ||
+        exp.user_email?.toLowerCase().includes(search) ||
+        exp.total_amount?.toString().includes(search)
+      );
+    }
+
+    // Apply status filter
+    if (statusFilter !== "all") {
+      filtered = filtered.filter(exp => exp.status === statusFilter);
+    }
+
+    // Apply sorting
+    filtered = [...filtered].sort((a, b) => {
+      const dateA = new Date(a.created_at).getTime();
+      const dateB = new Date(b.created_at).getTime();
+      return sortOrder === "asc" ? dateA - dateB : dateB - dateA;
+    });
+
+    setExpenses(filtered);
   };
 
   const fetchExpenseDetails = async (expenseId: string) => {
@@ -245,25 +381,58 @@ export default function EngineerReview() {
     }
   };
 
+  const rejectExpense = async () => {
+    if (!selectedExpense || !user) return;
+
+    try {
+      setReviewLoading(true);
+
+      await ExpenseService.rejectExpense(selectedExpense.id, user.id, engineerComment);
+
+      toast({
+        title: "Expense Rejected",
+        description: "Expense has been rejected successfully",
+      });
+
+      setSelectedExpense(null);
+      setEngineerComment("");
+      setLineItems([]);
+      setAttachments([]);
+      fetchAssignedExpenses();
+    } catch (error: any) {
+      console.error("Error rejecting expense:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Failed to reject expense",
+      });
+    } finally {
+      setReviewLoading(false);
+    }
+  };
+
   const isActionDisabled = (exp?: Expense | null) => {
     if (!exp) return true;
-    // Allow action on "submitted" expenses (engineers can verify or approve based on limit)
-    // Disable action only if already "approved" or "verified" (for expenses above limit)
+    // Allow action on "submitted" expenses (engineers can verify, approve, or reject)
+    // Disable action if already "approved" or "rejected"
     if (exp.status === "approved") return true;
-    if (exp.status === "verified" && exp.total_amount >= engineerApprovalLimit) return true;
+    if (exp.status === "rejected") return true;
+    if (exp.status === "verified" && Number(exp.total_amount) >= Number(engineerApprovalLimit)) return true;
     return false;
   };
 
   const getStats = () => {
-    const totalAssigned = expenses.length;
-    const pendingReview = expenses.filter(e => e.status === "submitted").length;
-    const verified = expenses.filter(e => e.status === "verified").length;
-    const totalAmount = expenses.reduce((sum, e) => sum + e.total_amount, 0);
+    const totalAssigned = allExpenses.length;
+    const pendingReview = allExpenses.filter(e => e.status === "submitted").length;
+    const verified = allExpenses.filter(e => e.status === "verified").length;
+    const approved = allExpenses.filter(e => e.status === "approved").length;
+    const totalAmount = allExpenses.reduce((sum, e) => sum + e.total_amount, 0);
 
     return {
       totalAssigned,
       pendingReview,
       verified,
+      approved,
       totalAmount
     };
   };
@@ -342,6 +511,63 @@ export default function EngineerReview() {
           <CardDescription>Review and verify expense submissions assigned to you</CardDescription>
         </CardHeader>
         <CardContent>
+          {/* Search and Filter Bar */}
+          <div className="flex flex-col sm:flex-row gap-3 mb-6">
+            {/* Search Bar */}
+            <div className="flex-1 relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Input
+                placeholder="Search by title or destination..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+            
+            {/* Status Filter */}
+            <div className="w-full sm:w-40">
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="All Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Status</SelectItem>
+                  <SelectItem value="submitted">Submitted</SelectItem>
+                  <SelectItem value="verified">Verified</SelectItem>
+                  <SelectItem value="approved">Approved</SelectItem>
+                  <SelectItem value="rejected">Rejected</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Date Sorter */}
+            <div className="w-full sm:w-40">
+              <Select value={sortOrder} onValueChange={setSortOrder}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Date Created" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="desc">Date Created (Newest)</SelectItem>
+                  <SelectItem value="asc">Date Created (Oldest)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            {/* Time Period Dropdown */}
+            <div className="w-full sm:w-40">
+              <Select value={timePeriod} onValueChange={setTimePeriod}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Time Period" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Time</SelectItem>
+                  <SelectItem value="week">Past Week</SelectItem>
+                  <SelectItem value="month">Past Month</SelectItem>
+                  <SelectItem value="year">Past Year</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
           {loading ? (
             <p className="text-muted-foreground">Loading...</p>
           ) : expenses.length === 0 ? (
@@ -384,19 +610,31 @@ export default function EngineerReview() {
                       {format(new Date(expense.created_at), "MMM d, yyyy")}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Dialog>
-                        <DialogTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              setSelectedExpense(expense);
-                              fetchExpenseDetails(expense.id);
-                            }}
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                        </DialogTrigger>
+                      {expense.status === "approved" || expense.status === "rejected" ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled
+                          title={expense.status === "approved" ? "Expense is already approved" : "Expense is rejected"}
+                        >
+                          <Eye className="h-4 w-4 opacity-50" />
+                        </Button>
+                      ) : (
+                        <Dialog>
+                          <DialogTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={async () => {
+                                setSelectedExpense(expense);
+                                fetchExpenseDetails(expense.id);
+                                // Refresh the approval limit to get the latest value from admin settings
+                                await fetchEngineerApprovalLimit();
+                              }}
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                          </DialogTrigger>
                         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
                           <DialogHeader>
                             <DialogTitle>Expense Review</DialogTitle>
@@ -606,28 +844,61 @@ export default function EngineerReview() {
                             >
                               Cancel
                             </Button>
-                            {selectedExpense && selectedExpense.total_amount < engineerApprovalLimit ? (
-                              // Below limit: Show only Approve button
-                              <Button 
-                                onClick={() => approveExpense()}
-                                disabled={reviewLoading || isActionDisabled(selectedExpense)}
-                              >
-                                <CheckCircle className="mr-2 h-4 w-4" />
-                                Approve
-                              </Button>
-                            ) : (
-                              // At or above limit: Show only Verify button
-                              <Button 
-                                onClick={() => verifyExpense()}
-                                disabled={reviewLoading || isActionDisabled(selectedExpense)}
-                              >
-                                <CheckCircle className="mr-2 h-4 w-4" />
-                                Verify
-                              </Button>
-                            )}
+                            {selectedExpense && (() => {
+                              // Don't show any action buttons for rejected expenses
+                              if (selectedExpense.status === "rejected") {
+                                return null;
+                              }
+                              
+                              const expenseAmount = Number(selectedExpense.total_amount);
+                              const limit = Number(engineerApprovalLimit);
+                              const canTakeAction = !isActionDisabled(selectedExpense);
+                              
+                              // If expense amount <= limit: Show Approve and Reject buttons
+                              // If expense amount > limit: Show Verify and Reject buttons
+                              if (expenseAmount <= limit) {
+                                return (
+                                  <>
+                                    <Button 
+                                      onClick={() => rejectExpense()}
+                                      disabled={reviewLoading || !canTakeAction}
+                                      variant="destructive"
+                                    >
+                                      Reject
+                                    </Button>
+                                    <Button 
+                                      onClick={() => approveExpense()}
+                                      disabled={reviewLoading || !canTakeAction}
+                                    >
+                                      Approve
+                                    </Button>
+                                  </>
+                                );
+                              } else {
+                                return (
+                                  <>
+                                    <Button 
+                                      onClick={() => rejectExpense()}
+                                      disabled={reviewLoading || !canTakeAction}
+                                      variant="destructive"
+                                    >
+                                      Reject
+                                    </Button>
+                                    <Button 
+                                      onClick={() => verifyExpense()}
+                                      disabled={reviewLoading || !canTakeAction}
+                                      className="bg-blue-500 hover:bg-blue-600"
+                                    >
+                                      Verify
+                                    </Button>
+                                  </>
+                                );
+                              }
+                            })()}
                           </DialogFooter>
                         </DialogContent>
                       </Dialog>
+                      )}
                       {/* Image Preview Dialog */}
                       <Dialog open={imagePreviewOpen} onOpenChange={setImagePreviewOpen}>
                         <DialogContent className="max-w-3xl">

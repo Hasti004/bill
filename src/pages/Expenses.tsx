@@ -187,6 +187,7 @@ export default function Expenses() {
                   <SelectItem value="submitted">Submitted</SelectItem>
                   <SelectItem value="verified">Verified</SelectItem>
                   <SelectItem value="approved">Approved</SelectItem>
+                  <SelectItem value="rejected">Rejected</SelectItem>
                 </SelectContent>
               </Select>
               <Select value={sortBy} onValueChange={setSortBy}>
