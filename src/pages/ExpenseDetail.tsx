@@ -14,7 +14,7 @@ import {
   FileText, 
   Calendar, 
   MapPin, 
-  DollarSign, 
+  Coins, 
   User, 
   Clock,
   CheckCircle,
@@ -369,7 +369,7 @@ export default function ExpenseDetail() {
                 </div>
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <DollarSign className="h-4 w-4" />
+                    <Coins className="h-4 w-4" />
                     Total Amount
                   </div>
                   <p className="text-2xl font-bold">{formatINR(expense.total_amount)}</p>

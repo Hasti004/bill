@@ -249,19 +249,22 @@ export default function CategoryManagement() {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <div className="text-center py-8">Loading categories...</div>
+            <div className="min-h-[400px] flex items-center justify-center">
+              <div className="text-center py-8">Loading categories...</div>
+            </div>
           ) : categories.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">No categories found</div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Created At</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
+            <div className="overflow-x-auto">
+              <Table className="table-fixed w-full">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[35%]">Name</TableHead>
+                    <TableHead className="w-[20%]">Status</TableHead>
+                    <TableHead className="w-[25%]">Created At</TableHead>
+                    <TableHead className="text-right w-[20%]">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
               <TableBody>
                 {categories.map((category) => (
                   <TableRow key={category.id}>
@@ -284,6 +287,7 @@ export default function CategoryManagement() {
                         <Button
                           variant="outline"
                           size="sm"
+                          className="min-w-[40px]"
                           onClick={() => openEditDialog(category)}
                         >
                           <Edit className="h-4 w-4" />
@@ -291,6 +295,7 @@ export default function CategoryManagement() {
                         <Button
                           variant="destructive"
                           size="sm"
+                          className="min-w-[40px]"
                           onClick={() => openDeleteDialog(category)}
                         >
                           <Trash2 className="h-4 w-4" />
@@ -301,6 +306,7 @@ export default function CategoryManagement() {
                 ))}
               </TableBody>
             </Table>
+            </div>
           )}
         </CardContent>
       </Card>

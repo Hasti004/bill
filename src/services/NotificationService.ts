@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { formatINR } from "@/lib/format";
 
 export type NotificationType = 
   | "expense_verified" 
@@ -73,7 +74,7 @@ export async function notifyExpenseApproved(
     userId: employeeUserId,
     type: "expense_approved",
     title: "Expense Approved",
-    message: `Your expense "${expenseTitle}" (₹${amount.toFixed(2)}) has been approved by ${approverName}`,
+    message: `Your expense "${expenseTitle}" (${formatINR(amount)}) has been approved by ${approverName}`,
     expenseId,
   });
 }
@@ -126,7 +127,7 @@ export async function notifyBalanceAdded(
     userId,
     type: "balance_added",
     title: "Balance Updated",
-    message: `Your balance has been updated. ₹${amount.toFixed(2)} has been added to your account by ${cashierName}`,
+    message: `Your balance has been updated. ${formatINR(amount)} has been added to your account by ${cashierName}`,
   });
 }
 
@@ -144,7 +145,7 @@ export async function notifyEngineerExpenseApproved(
     userId: engineerUserId,
     type: "expense_approved",
     title: "Expense Approved",
-    message: `Your expense "${expenseTitle}" (₹${amount.toFixed(2)}) has been approved by ${adminName}`,
+    message: `Your expense "${expenseTitle}" (${formatINR(amount)}) has been approved by ${adminName}`,
     expenseId,
   });
 }
@@ -186,7 +187,7 @@ export async function notifyExpenseVerifiedToAdmin(
       userId: adminId,
       type: "expense_submitted",
       title: "Expense Verified - Awaiting Approval",
-      message: `${engineerName} has verified "${expenseTitle}" (₹${amount.toFixed(2)}) from ${employeeName}. Please review and approve.`,
+      message: `${engineerName} has verified "${expenseTitle}" (${formatINR(amount)}) from ${employeeName}. Please review and approve.`,
       expenseId,
     })
   );

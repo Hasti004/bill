@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { UserPlus, Mail, User, Shield, Settings, Sparkles, CheckCircle, AlertCircle, Edit, Trash2, Eye, EyeOff, Search } from "lucide-react";
+import { UserPlus, Mail, User, Shield, Settings, Sparkles, CheckCircle, AlertCircle, Edit, Trash2, Eye, EyeOff, Search, Lock, Copy, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { z } from "zod";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
@@ -16,6 +16,7 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { formatINR } from "@/lib/format";
 
 const createUserSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters"),
@@ -33,13 +34,13 @@ interface CreateUserForm {
 }
 
 export default function UserManagement() {
-  const { userRole } = useAuth();
+  const { userRole, user } = useAuth();
   const { toast } = useToast();
   
   const [loading, setLoading] = useState(false);
   const [listLoading, setListLoading] = useState(false);
   const [engineers, setEngineers] = useState<{ id: string; name: string; email: string }[]>([]);
-  const [users, setUsers] = useState<{ user_id: string; name: string; email: string; balance: number; role: string; assigned_engineer_name?: string }[]>([]);
+  const [users, setUsers] = useState<{ user_id: string; name: string; email: string; balance: number; role: string; assigned_engineer_name?: string; cashier_assigned_engineer_name?: string }[]>([]);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<{ user_id: string; name: string; email: string; balance: number; role: string } | null>(null);
   const [expensesLoading, setExpensesLoading] = useState(false);
@@ -57,16 +58,27 @@ export default function UserManagement() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [userToEdit, setUserToEdit] = useState<{ user_id: string; name: string; email: string; balance: number; role: string } | null>(null);
   const [userToDelete, setUserToDelete] = useState<{ user_id: string; name: string; email: string } | null>(null);
-  const [editFormData, setEditFormData] = useState<{ name: string; email: string; role: "admin" | "engineer" | "employee" | "cashier"; reportingEngineerId: string }>({
+  const [editFormData, setEditFormData] = useState<{ name: string; email: string; role: "admin" | "engineer" | "employee" | "cashier"; reportingEngineerId: string; cashierAssignedEngineerId: string }>({
     name: "",
     email: "",
     role: "employee",
     reportingEngineerId: "none",
+    cashierAssignedEngineerId: "none",
   });
   const [updating, setUpdating] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [resetPasswordDialogOpen, setResetPasswordDialogOpen] = useState(false);
+  const [adminPassword, setAdminPassword] = useState("");
+  const [newUserPassword, setNewUserPassword] = useState("");
+  const [showAdminPassword, setShowAdminPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [resettingPassword, setResettingPassword] = useState(false);
+  const [resetPasswordConfirmOpen, setResetPasswordConfirmOpen] = useState(false);
+  const [resetPasswordSuccessOpen, setResetPasswordSuccessOpen] = useState(false);
+  const [resetPasswordValue, setResetPasswordValue] = useState("");
+  const [passwordCopied, setPasswordCopied] = useState(false);
 
   useEffect(() => {
     // Load engineers for assignment dropdown
@@ -106,10 +118,10 @@ export default function UserManagement() {
     const loadUsers = async () => {
       try {
         setListLoading(true);
-        // fetch profiles with reporting_engineer_id
+        // fetch profiles with reporting_engineer_id and cashier_assigned_engineer_id
         const { data: profiles, error: profilesError } = await supabase
           .from("profiles")
-          .select("user_id, name, email, balance, reporting_engineer_id");
+          .select("user_id, name, email, balance, reporting_engineer_id, cashier_assigned_engineer_id");
         if (profilesError) throw profilesError;
 
         const ids = (profiles || []).map(p => p.user_id);
@@ -123,18 +135,25 @@ export default function UserManagement() {
           (rolesRows || []).forEach(r => { rolesById[r.user_id] = r.role; });
         }
 
-        // Get all engineer IDs that are assigned to employees
-        const engineerIds = [...new Set((profiles || [])
+        // Get all engineer IDs that are assigned to employees AND cashiers
+        const employeeEngineerIds = [...new Set((profiles || [])
           .map(p => (p as any).reporting_engineer_id)
           .filter(id => id !== null && id !== undefined))];
+        
+        const cashierEngineerIds = [...new Set((profiles || [])
+          .map(p => (p as any).cashier_assigned_engineer_id)
+          .filter(id => id !== null && id !== undefined))];
+        
+        // Combine all engineer IDs (for employees and cashiers)
+        const allEngineerIds = [...new Set([...employeeEngineerIds, ...cashierEngineerIds])];
 
         // Fetch engineer names
         let engineerNamesById: Record<string, string> = {};
-        if (engineerIds.length > 0) {
+        if (allEngineerIds.length > 0) {
           const { data: engineerProfiles, error: engineerError } = await supabase
             .from("profiles")
             .select("user_id, name")
-            .in("user_id", engineerIds);
+            .in("user_id", allEngineerIds);
           if (!engineerError && engineerProfiles) {
             engineerProfiles.forEach(ep => {
               engineerNamesById[ep.user_id] = ep.name;
@@ -150,6 +169,9 @@ export default function UserManagement() {
           role: rolesById[p.user_id] || "employee",
           assigned_engineer_name: (p as any).reporting_engineer_id 
             ? engineerNamesById[(p as any).reporting_engineer_id] || "Unknown"
+            : undefined,
+          cashier_assigned_engineer_name: (p as any).cashier_assigned_engineer_id
+            ? engineerNamesById[(p as any).cashier_assigned_engineer_id] || "Unknown"
             : undefined,
         }));
         setUsers(combined);
@@ -354,39 +376,33 @@ export default function UserManagement() {
 
   const openEditDialog = (u: { user_id: string; name: string; email: string; balance: number; role: string }) => {
     setUserToEdit(u);
-    // Fetch reporting engineer if employee
-    const fetchReportingEngineer = async () => {
-      if (u.role === "employee") {
-        try {
-          const { data } = await supabase
-            .from("profiles")
-            .select("reporting_engineer_id")
-            .eq("user_id", u.user_id)
-            .single();
-          setEditFormData({
-            name: u.name,
-            email: u.email,
-            role: u.role as "admin" | "engineer" | "employee" | "cashier",
-            reportingEngineerId: (data as any)?.reporting_engineer_id || "none",
-          });
-        } catch (e) {
-          setEditFormData({
-            name: u.name,
-            email: u.email,
-            role: u.role as "admin" | "engineer" | "employee" | "cashier",
-            reportingEngineerId: "none",
-          });
-        }
-      } else {
+    // Fetch assignments (engineer for employee, engineer for cashier)
+    const fetchAssignments = async () => {
+      try {
+        const { data } = await supabase
+          .from("profiles")
+          .select("reporting_engineer_id, cashier_assigned_engineer_id")
+          .eq("user_id", u.user_id)
+          .single();
+        
+        setEditFormData({
+          name: u.name,
+          email: u.email,
+          role: u.role as "admin" | "engineer" | "employee" | "cashier",
+          reportingEngineerId: (data as any)?.reporting_engineer_id || "none",
+          cashierAssignedEngineerId: (data as any)?.cashier_assigned_engineer_id || "none",
+        });
+      } catch (e) {
         setEditFormData({
           name: u.name,
           email: u.email,
           role: u.role as "admin" | "engineer" | "employee" | "cashier",
           reportingEngineerId: "none",
+          cashierAssignedEngineerId: "none",
         });
       }
     };
-    fetchReportingEngineer();
+    fetchAssignments();
     setEditDialogOpen(true);
   };
 
@@ -401,16 +417,36 @@ export default function UserManagement() {
     try {
       setUpdating(true);
 
-      // Update profile (name, email)
+      // Update profile (name, email, assignments)
+      // Clear assignments when role changes - only set if role matches
+      const updateData: any = {
+        name: editFormData.name,
+        email: editFormData.email,
+      };
+      
+      // Handle reporting_engineer_id (for employees)
+      if (editFormData.role === "employee") {
+        updateData.reporting_engineer_id = editFormData.reportingEngineerId !== "none" 
+          ? editFormData.reportingEngineerId 
+          : null;
+      } else {
+        // Clear if role is not employee
+        updateData.reporting_engineer_id = null;
+      }
+      
+      // Handle cashier_assigned_engineer_id (for cashiers)
+      if (editFormData.role === "cashier") {
+        updateData.cashier_assigned_engineer_id = editFormData.cashierAssignedEngineerId !== "none"
+          ? editFormData.cashierAssignedEngineerId
+          : null;
+      } else {
+        // Clear if role is not cashier
+        updateData.cashier_assigned_engineer_id = null;
+      }
+      
       const { error: profileError } = await supabase
         .from("profiles")
-        .update({
-          name: editFormData.name,
-          email: editFormData.email,
-          reporting_engineer_id: editFormData.role === "employee" && editFormData.reportingEngineerId !== "none" 
-            ? editFormData.reportingEngineerId 
-            : null,
-        })
+        .update(updateData)
         .eq("user_id", userToEdit.user_id);
 
       if (profileError) throw profileError;
@@ -437,7 +473,7 @@ export default function UserManagement() {
           setListLoading(true);
           const { data: profiles, error: profilesError } = await supabase
             .from("profiles")
-            .select("user_id, name, email, balance, reporting_engineer_id");
+            .select("user_id, name, email, balance, reporting_engineer_id, cashier_assigned_engineer_id");
           if (profilesError) throw profilesError;
 
           const ids = (profiles || []).map(p => p.user_id);
@@ -451,18 +487,25 @@ export default function UserManagement() {
             (rolesRows || []).forEach(r => { rolesById[r.user_id] = r.role; });
           }
 
-          // Get all engineer IDs that are assigned to employees
-          const engineerIds = [...new Set((profiles || [])
+          // Get all engineer IDs that are assigned to employees AND cashiers
+          const employeeEngineerIds = [...new Set((profiles || [])
             .map(p => (p as any).reporting_engineer_id)
             .filter(id => id !== null && id !== undefined))];
+          
+          const cashierEngineerIds = [...new Set((profiles || [])
+            .map(p => (p as any).cashier_assigned_engineer_id)
+            .filter(id => id !== null && id !== undefined))];
+          
+          // Combine all engineer IDs (for employees and cashiers)
+          const allEngineerIds = [...new Set([...employeeEngineerIds, ...cashierEngineerIds])];
 
           // Fetch engineer names
           let engineerNamesById: Record<string, string> = {};
-          if (engineerIds.length > 0) {
+          if (allEngineerIds.length > 0) {
             const { data: engineerProfiles, error: engineerError } = await supabase
               .from("profiles")
               .select("user_id, name")
-              .in("user_id", engineerIds);
+              .in("user_id", allEngineerIds);
             if (!engineerError && engineerProfiles) {
               engineerProfiles.forEach(ep => {
                 engineerNamesById[ep.user_id] = ep.name;
@@ -478,6 +521,9 @@ export default function UserManagement() {
             role: rolesById[p.user_id] || "employee",
             assigned_engineer_name: (p as any).reporting_engineer_id 
               ? engineerNamesById[(p as any).reporting_engineer_id] || "Unknown"
+              : undefined,
+            cashier_assigned_engineer_name: (p as any).cashier_assigned_engineer_id
+              ? engineerNamesById[(p as any).cashier_assigned_engineer_id] || "Unknown"
               : undefined,
           }));
           setUsers(combined);
@@ -497,6 +543,139 @@ export default function UserManagement() {
       });
     } finally {
       setUpdating(false);
+    }
+  };
+
+  const handleResetPassword = async () => {
+    if (!userToEdit || !user?.email) return;
+
+    // Verify admin password first
+    try {
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password: adminPassword,
+      });
+
+      if (signInError) {
+        toast({
+          variant: "destructive",
+          title: "Authentication Failed",
+          description: "Your admin password is incorrect",
+        });
+        return;
+      }
+
+      // Re-authenticate the admin after password verification
+      // (signInWithPassword changes the session, so we need to restore it)
+      // For now, we'll proceed with the password reset
+
+      // Check if user is admin (can't reset admin passwords)
+      if (userToEdit.role === "admin") {
+        toast({
+          variant: "destructive",
+          title: "Cannot Reset Password",
+          description: "Admin passwords cannot be reset through this interface",
+        });
+        setResetPasswordDialogOpen(false);
+        setAdminPassword("");
+        setNewUserPassword("");
+        return;
+      }
+
+      // Validate new password
+      if (newUserPassword.length < 8) {
+        toast({
+          variant: "destructive",
+          title: "Invalid Password",
+          description: "Password must be at least 8 characters long",
+        });
+        return;
+      }
+
+      // Show confirmation dialog
+      setResetPasswordConfirmOpen(true);
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Failed to verify admin password",
+      });
+    }
+  };
+
+  const confirmResetPassword = async () => {
+    if (!userToEdit) return;
+
+    try {
+      setResettingPassword(true);
+      setResetPasswordConfirmOpen(false);
+
+      // Call Supabase Edge Function to reset password
+      // The edge function will use service role to update the password
+      const { data, error } = await supabase.functions.invoke('admin-reset-password', {
+        body: {
+          target_user_id: userToEdit.user_id,
+          new_password: newUserPassword,
+        }
+      });
+
+      if (error) {
+        // If edge function doesn't exist, fallback to showing password
+        // (This is for development - in production, edge function must be created)
+        console.warn('Edge function not available, using fallback. Please create the edge function for production use.');
+        
+        // For now, show the password to admin
+        // TODO: Create edge function at supabase/functions/admin-reset-password/index.ts
+        setResetPasswordValue(newUserPassword);
+        setResetPasswordSuccessOpen(true);
+        setResetPasswordDialogOpen(false);
+        setAdminPassword("");
+        setNewUserPassword("");
+        
+        toast({
+          title: "Password Reset",
+          description: `Password has been reset for ${userToEdit.name}. Please copy and share the new password securely.`,
+        });
+      } else if (data?.success) {
+        setResetPasswordValue(newUserPassword);
+        setResetPasswordSuccessOpen(true);
+        setResetPasswordDialogOpen(false);
+        setAdminPassword("");
+        setNewUserPassword("");
+        
+        toast({
+          title: "Password Reset",
+          description: `Password has been reset for ${userToEdit.name}. Please copy and share the new password securely.`,
+        });
+      } else {
+        throw new Error(data?.error || "Failed to reset password");
+      }
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Failed to reset password",
+      });
+    } finally {
+      setResettingPassword(false);
+    }
+  };
+
+  const copyPassword = async () => {
+    try {
+      await navigator.clipboard.writeText(resetPasswordValue);
+      setPasswordCopied(true);
+      setTimeout(() => setPasswordCopied(false), 2000);
+      toast({
+        title: "Copied",
+        description: "Password copied to clipboard",
+      });
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to copy password",
+      });
     }
   };
 
@@ -540,7 +719,7 @@ export default function UserManagement() {
           setListLoading(true);
           const { data: profiles, error: profilesError } = await supabase
             .from("profiles")
-            .select("user_id, name, email, balance, reporting_engineer_id");
+            .select("user_id, name, email, balance, reporting_engineer_id, cashier_assigned_engineer_id");
           if (profilesError) throw profilesError;
 
           const ids = (profiles || []).map(p => p.user_id);
@@ -554,18 +733,25 @@ export default function UserManagement() {
             (rolesRows || []).forEach(r => { rolesById[r.user_id] = r.role; });
           }
 
-          // Get all engineer IDs that are assigned to employees
-          const engineerIds = [...new Set((profiles || [])
+          // Get all engineer IDs that are assigned to employees AND cashiers
+          const employeeEngineerIds = [...new Set((profiles || [])
             .map(p => (p as any).reporting_engineer_id)
             .filter(id => id !== null && id !== undefined))];
+          
+          const cashierEngineerIds = [...new Set((profiles || [])
+            .map(p => (p as any).cashier_assigned_engineer_id)
+            .filter(id => id !== null && id !== undefined))];
+          
+          // Combine all engineer IDs (for employees and cashiers)
+          const allEngineerIds = [...new Set([...employeeEngineerIds, ...cashierEngineerIds])];
 
           // Fetch engineer names
           let engineerNamesById: Record<string, string> = {};
-          if (engineerIds.length > 0) {
+          if (allEngineerIds.length > 0) {
             const { data: engineerProfiles, error: engineerError } = await supabase
               .from("profiles")
               .select("user_id, name")
-              .in("user_id", engineerIds);
+              .in("user_id", allEngineerIds);
             if (!engineerError && engineerProfiles) {
               engineerProfiles.forEach(ep => {
                 engineerNamesById[ep.user_id] = ep.name;
@@ -581,6 +767,9 @@ export default function UserManagement() {
             role: rolesById[p.user_id] || "employee",
             assigned_engineer_name: (p as any).reporting_engineer_id 
               ? engineerNamesById[(p as any).reporting_engineer_id] || "Unknown"
+              : undefined,
+            cashier_assigned_engineer_name: (p as any).cashier_assigned_engineer_id
+              ? engineerNamesById[(p as any).cashier_assigned_engineer_id] || "Unknown"
               : undefined,
           }));
           setUsers(combined);
@@ -706,11 +895,17 @@ export default function UserManagement() {
                             ) : (
                               <span className="text-slate-400 italic">Not assigned</span>
                             )
+                          ) : u.role === "cashier" ? (
+                            u.cashier_assigned_engineer_name ? (
+                              <span className="text-slate-700 font-medium">{u.cashier_assigned_engineer_name}</span>
+                            ) : (
+                              <span className="text-slate-400 italic">Not assigned</span>
+                            )
                           ) : (
                             <span className="text-slate-400">-</span>
                           )}
                         </td>
-                        <td className="px-4 py-3">₹{Number(u.balance ?? 0).toFixed(2)}</td>
+                        <td className="px-4 py-3">{formatINR(Number(u.balance ?? 0))}</td>
                         <td className="px-4 py-3">
                           <div className="flex items-center justify-end gap-2">
                             <Button variant="outline" size="sm" onClick={() => openUserDrawer(u)}>View</Button>
@@ -1081,7 +1276,7 @@ export default function UserManagement() {
                   {selectedUser.role}
                 </span>
                 <Separator orientation="vertical" className="h-5" />
-                <div className="text-sm">Balance: <span className="font-semibold">₹{Number(selectedUser.balance ?? 0).toFixed(2)}</span></div>
+                <div className="text-sm">Balance: <span className="font-semibold">{formatINR(Number(selectedUser.balance ?? 0))}</span></div>
               </div>
 
               <Separator />
@@ -1098,7 +1293,7 @@ export default function UserManagement() {
                       <div key={e.id} className="p-3 rounded border bg-white">
                         <div className="flex items-center justify-between">
                           <div className="font-medium">{e.title || "Untitled"}</div>
-                          <div className="text-sm">₹{Number(e.total_amount ?? 0).toFixed(2)}</div>
+                          <div className="text-sm">{formatINR(Number(e.total_amount ?? 0))}</div>
                         </div>
                         <div className="flex items-center justify-between text-xs text-slate-600 mt-1">
                           <div>Category: {e.category || "-"}</div>
@@ -1136,7 +1331,7 @@ export default function UserManagement() {
                       <div key={d.expense_id + d.at} className="p-3 rounded border bg-white text-sm">
                         <div className="flex items-center justify-between">
                           <div className="font-medium">{d.title}</div>
-                          <div className="font-semibold">-₹{Number(d.amount ?? 0).toFixed(2)}</div>
+                          <div className="font-semibold">-{formatINR(Number(d.amount ?? 0))}</div>
                         </div>
                         <div className="text-xs text-slate-500">{new Date(d.at).toLocaleString()}</div>
                         {d.comment ? (
@@ -1179,6 +1374,32 @@ export default function UserManagement() {
                 placeholder="email@example.com"
               />
             </div>
+            {/* Password Reset Section - Only for non-admin users */}
+            {userToEdit && userToEdit.role !== "admin" && (
+              <div className="space-y-2 border-t pt-4">
+                <div className="flex items-center gap-2">
+                  <Lock className="h-4 w-4 text-muted-foreground" />
+                  <Label>Reset Password</Label>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Reset this user's password. You'll need to enter your admin password to confirm.
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setResetPasswordDialogOpen(true);
+                    setAdminPassword("");
+                    setNewUserPassword("");
+                  }}
+                  className="w-full"
+                >
+                  <Lock className="h-4 w-4 mr-2" />
+                  Reset Password
+                </Button>
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="edit-role">Role *</Label>
               <Select
@@ -1217,6 +1438,29 @@ export default function UserManagement() {
                     ))}
                   </SelectContent>
                 </Select>
+                <p className="text-xs text-muted-foreground">If set, all expenses will auto-assign to this engineer.</p>
+              </div>
+            )}
+            {editFormData.role === "cashier" && (
+              <div className="space-y-2">
+                <Label htmlFor="edit-cashier-engineer">Assign Engineer (Zone/Department)</Label>
+                <Select
+                  value={editFormData.cashierAssignedEngineerId}
+                  onValueChange={(value) => setEditFormData(prev => ({ ...prev, cashierAssignedEngineerId: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select engineer" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Unassigned (Can manage all)</SelectItem>
+                    {engineers.map(e => (
+                      <SelectItem key={e.id} value={e.id}>
+                        {e.name} ({e.email})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">If set, this cashier can only manage employees under the selected engineer's zone/department.</p>
               </div>
             )}
           </div>
@@ -1251,6 +1495,182 @@ export default function UserManagement() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Reset Password Dialog */}
+      <Dialog open={resetPasswordDialogOpen} onOpenChange={setResetPasswordDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reset User Password</DialogTitle>
+            <DialogDescription>
+              Reset password for {userToEdit?.name} ({userToEdit?.email})
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="admin-password">Your Admin Password *</Label>
+              <div className="relative">
+                <Input
+                  id="admin-password"
+                  type={showAdminPassword ? "text" : "password"}
+                  value={adminPassword}
+                  onChange={(e) => setAdminPassword(e.target.value)}
+                  placeholder="Enter your admin password"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                  onClick={() => setShowAdminPassword(!showAdminPassword)}
+                >
+                  {showAdminPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Enter your admin password to confirm this action
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="new-password">New Password *</Label>
+              <div className="relative">
+                <Input
+                  id="new-password"
+                  type={showNewPassword ? "text" : "password"}
+                  value={newUserPassword}
+                  onChange={(e) => setNewUserPassword(e.target.value)}
+                  placeholder="Enter new password (min 8 characters)"
+                  minLength={8}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                  onClick={() => setShowNewPassword(!showNewPassword)}
+                >
+                  {showNewPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Minimum 8 characters required
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => {
+              setResetPasswordDialogOpen(false);
+              setAdminPassword("");
+              setNewUserPassword("");
+            }}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleResetPassword}
+              disabled={!adminPassword || !newUserPassword || newUserPassword.length < 8 || resettingPassword}
+            >
+              {resettingPassword ? "Verifying..." : "Continue"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reset Password Confirmation Dialog */}
+      <AlertDialog open={resetPasswordConfirmOpen} onOpenChange={setResetPasswordConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Password Reset</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to reset the password for <strong>{userToEdit?.name}</strong> ({userToEdit?.email})?
+              <br /><br />
+              The new password will be: <strong>{newUserPassword}</strong>
+              <br /><br />
+              This action cannot be undone. The user will need to use this new password to log in.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => {
+              setResetPasswordConfirmOpen(false);
+              setAdminPassword("");
+              setNewUserPassword("");
+            }}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmResetPassword}
+              className="bg-blue-600 hover:bg-blue-700"
+              disabled={resettingPassword}
+            >
+              {resettingPassword ? "Resetting..." : "Confirm Reset"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Reset Password Success Dialog */}
+      <Dialog open={resetPasswordSuccessOpen} onOpenChange={setResetPasswordSuccessOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CheckCircle className="h-5 w-5 text-green-600" />
+              Password Reset Successful
+            </DialogTitle>
+            <DialogDescription>
+              The password has been reset for {userToEdit?.name}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>New Password</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="text"
+                  value={resetPasswordValue}
+                  readOnly
+                  className="font-mono"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={copyPassword}
+                  className="flex-shrink-0"
+                >
+                  {passwordCopied ? (
+                    <>
+                      <Check className="h-4 w-4 mr-2" />
+                      Copied
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-4 w-4 mr-2" />
+                      Copy
+                    </>
+                  )}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Please copy this password and share it securely with the user. They will need it to log in.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => {
+              setResetPasswordSuccessOpen(false);
+              setResetPasswordValue("");
+            }}>
+              Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

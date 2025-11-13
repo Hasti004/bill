@@ -22,7 +22,7 @@ import {
   CheckCircle, 
   XCircle, 
   Clock, 
-  DollarSign,
+  Coins,
   Eye,
   UserPlus,
   Settings,
@@ -461,7 +461,7 @@ export default function AdminPanel() {
       
       toast({
         title: "Expense Approved",
-        description: `Expense approved and ₹${selectedExpense.total_amount} deducted from employee balance.`,
+        description: `Expense approved and ${formatINR(selectedExpense.total_amount)} deducted from employee balance.`,
       });
 
       // Close dialog and reset
@@ -626,21 +626,32 @@ export default function AdminPanel() {
     return matchesSearch && matchesStatus;
   });
 
+  // Helper function to escape CSV values
+  const escapeCSV = (value: any): string => {
+    if (value === null || value === undefined) return "";
+    const str = String(value);
+    // If value contains comma, quote, or newline, wrap in quotes and escape quotes
+    if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  };
+
   const exportExpenses = () => {
     const csvContent = [
       ["Employee", "Email", "Title", "Destination", "Amount (INR)", "Status", "Created Date"],
       ...filteredExpenses.map(expense => [
-        expense.user_name,
-        expense.user_email,
-        expense.title,
-        expense.destination,
-        formatINR(expense.total_amount),
-        expense.status,
-        format(new Date(expense.created_at), "MMM d, yyyy")
+        escapeCSV(expense.user_name),
+        escapeCSV(expense.user_email),
+        escapeCSV(expense.title),
+        escapeCSV(expense.destination),
+        Number(expense.total_amount).toFixed(2), // Raw number without formatting
+        escapeCSV(expense.status),
+        format(new Date(expense.created_at), "yyyy-MM-dd") // Clean date format
       ])
     ].map(row => row.join(",")).join("\n");
 
-    const blob = new Blob([csvContent], { type: "text/csv" });
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -694,15 +705,15 @@ export default function AdminPanel() {
       </div>
 
       {/* Mobile-optimized Stats Cards */}
-      <div className="grid gap-3 sm:gap-4 md:gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-3 sm:gap-4 md:gap-6 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
         <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm hover:shadow-2xl transition-all duration-300">
           <CardContent className="p-4 sm:p-6">
-            <div className="flex items-center justify-between">
-              <div className="space-y-1 sm:space-y-2 min-w-0">
+            <div className="flex items-center justify-between gap-3">
+              <div className="space-y-1 sm:space-y-2 min-w-0 flex-1 overflow-hidden">
                 <p className="text-xs sm:text-sm font-medium text-gray-600 truncate">Total Users</p>
-                <p className="text-xl sm:text-2xl font-bold text-gray-900">{stats.totalUsers}</p>
+                <p className="text-xl sm:text-2xl font-bold text-gray-900 whitespace-nowrap">{stats.totalUsers}</p>
               </div>
-              <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg sm:rounded-xl flex items-center justify-center shadow-lg flex-shrink-0">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg sm:rounded-xl flex items-center justify-center shadow-lg flex-shrink-0 ml-2">
                 <Users className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
               </div>
             </div>
@@ -711,12 +722,12 @@ export default function AdminPanel() {
 
         <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm hover:shadow-2xl transition-all duration-300">
           <CardContent className="p-4 sm:p-6">
-            <div className="flex items-center justify-between">
-              <div className="space-y-1 sm:space-y-2 min-w-0">
+            <div className="flex items-center justify-between gap-3">
+              <div className="space-y-1 sm:space-y-2 min-w-0 flex-1 overflow-hidden">
                 <p className="text-xs sm:text-sm font-medium text-gray-600 truncate">Total Expenses</p>
-                <p className="text-xl sm:text-2xl font-bold text-gray-900">{stats.totalExpenses}</p>
+                <p className="text-xl sm:text-2xl font-bold text-gray-900 whitespace-nowrap">{stats.totalExpenses}</p>
               </div>
-              <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-r from-emerald-500 to-emerald-600 rounded-lg sm:rounded-xl flex items-center justify-center shadow-lg flex-shrink-0">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-r from-emerald-500 to-emerald-600 rounded-lg sm:rounded-xl flex items-center justify-center shadow-lg flex-shrink-0 ml-2">
                 <Receipt className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
               </div>
             </div>
@@ -725,12 +736,12 @@ export default function AdminPanel() {
 
         <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm hover:shadow-2xl transition-all duration-300">
           <CardContent className="p-4 sm:p-6">
-            <div className="flex items-center justify-between">
-              <div className="space-y-1 sm:space-y-2 min-w-0">
+            <div className="flex items-center justify-between gap-3">
+              <div className="space-y-1 sm:space-y-2 min-w-0 flex-1 overflow-hidden">
                 <p className="text-xs sm:text-sm font-medium text-gray-600 truncate">Pending</p>
-                <p className="text-xl sm:text-2xl font-bold text-gray-900">{stats.pendingExpenses}</p>
+                <p className="text-xl sm:text-2xl font-bold text-gray-900 whitespace-nowrap">{stats.pendingExpenses}</p>
               </div>
-              <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-r from-yellow-500 to-orange-500 rounded-lg sm:rounded-xl flex items-center justify-center shadow-lg flex-shrink-0">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-r from-yellow-500 to-orange-500 rounded-lg sm:rounded-xl flex items-center justify-center shadow-lg flex-shrink-0 ml-2">
                 <Clock className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
               </div>
             </div>
@@ -739,12 +750,12 @@ export default function AdminPanel() {
 
         <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm hover:shadow-2xl transition-all duration-300">
           <CardContent className="p-4 sm:p-6">
-            <div className="flex items-center justify-between">
-              <div className="space-y-1 sm:space-y-2 min-w-0">
+            <div className="flex items-center justify-between gap-3">
+              <div className="space-y-1 sm:space-y-2 min-w-0 flex-1 overflow-hidden">
                 <p className="text-xs sm:text-sm font-medium text-gray-600 truncate">Approved</p>
-                <p className="text-xl sm:text-2xl font-bold text-gray-900">{stats.approvedExpenses}</p>
+                <p className="text-xl sm:text-2xl font-bold text-gray-900 whitespace-nowrap">{stats.approvedExpenses}</p>
               </div>
-              <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-r from-green-500 to-emerald-500 rounded-lg sm:rounded-xl flex items-center justify-center shadow-lg flex-shrink-0">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-r from-green-500 to-emerald-500 rounded-lg sm:rounded-xl flex items-center justify-center shadow-lg flex-shrink-0 ml-2">
                 <CheckCircle className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
               </div>
             </div>
@@ -753,13 +764,13 @@ export default function AdminPanel() {
 
         <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm hover:shadow-2xl transition-all duration-300">
           <CardContent className="p-4 sm:p-6">
-            <div className="flex items-center justify-between">
-              <div className="space-y-1 sm:space-y-2 min-w-0">
+            <div className="flex items-center justify-between gap-3">
+              <div className="space-y-1 sm:space-y-2 min-w-0 flex-1 overflow-hidden">
                 <p className="text-xs sm:text-sm font-medium text-gray-600 truncate">Total Amount</p>
-                <p className="text-xl sm:text-2xl font-bold text-gray-900">{formatINR(stats.totalAmount)}</p>
+                <p className="text-xl sm:text-2xl font-bold text-gray-900 whitespace-nowrap overflow-hidden text-ellipsis">{formatINR(stats.totalAmount)}</p>
               </div>
-              <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-r from-purple-500 to-purple-600 rounded-lg sm:rounded-xl flex items-center justify-center shadow-lg flex-shrink-0">
-                <DollarSign className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
+              <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-r from-purple-500 to-purple-600 rounded-lg sm:rounded-xl flex items-center justify-center shadow-lg flex-shrink-0 ml-2">
+                <Coins className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
               </div>
             </div>
           </CardContent>
@@ -844,39 +855,41 @@ export default function AdminPanel() {
             </CardHeader>
             <CardContent>
               {loading ? (
-                <div className="flex items-center justify-center py-8">
+                <div className="min-h-[400px] flex items-center justify-center">
                   <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
                   <span className="ml-2 text-gray-600">Loading expenses...</span>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <Table>
+                  <Table className="table-fixed w-full">
                     <TableHeader>
                       <TableRow className="border-gray-200">
-                        <TableHead className="font-semibold">Employee</TableHead>
-                        <TableHead className="font-semibold">Title</TableHead>
-                        <TableHead className="font-semibold">Destination</TableHead>
-                        <TableHead className="font-semibold">Amount</TableHead>
-                        <TableHead className="font-semibold">Balance</TableHead>
-                        <TableHead className="font-semibold">Status</TableHead>
-                        <TableHead className="font-semibold">Created</TableHead>
-                        <TableHead className="text-right font-semibold">Actions</TableHead>
+                        <TableHead className="font-semibold w-[12%]">Employee</TableHead>
+                        <TableHead className="font-semibold w-[14%]">Title</TableHead>
+                        <TableHead className="font-semibold w-[12%]">Destination</TableHead>
+                        <TableHead className="font-semibold w-[10%]">Amount</TableHead>
+                        <TableHead className="font-semibold w-[10%]">Balance</TableHead>
+                        <TableHead className="font-semibold w-[10%]">Status</TableHead>
+                        <TableHead className="font-semibold w-[10%] whitespace-nowrap text-right pr-4">Created</TableHead>
+                        <TableHead className="text-right font-semibold w-[12%]">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {filteredExpenses.map((expense) => (
                       <TableRow key={expense.id}>
-                        <TableCell>
+                        <TableCell className="text-sm">
                           <div>
-                            <div className="font-medium">{expense.user_name}</div>
-                            <div className="text-sm text-muted-foreground">{expense.user_email}</div>
+                            <div className="font-medium truncate">{expense.user_name}</div>
+                            <div className="text-xs text-muted-foreground truncate">{expense.user_email}</div>
                           </div>
                         </TableCell>
-                        <TableCell className="font-medium">{expense.title}</TableCell>
-                        <TableCell>{expense.destination}</TableCell>
-                        <TableCell>{formatINR(expense.total_amount)}</TableCell>
-                        <TableCell>
-                          <div className={`font-medium ${
+                        <TableCell className="font-medium text-sm">
+                          <div className="line-clamp-2 break-words">{expense.title}</div>
+                        </TableCell>
+                        <TableCell className="text-sm truncate">{expense.destination}</TableCell>
+                        <TableCell className="whitespace-nowrap text-sm">{formatINR(expense.total_amount)}</TableCell>
+                        <TableCell className="text-sm">
+                          <div className={`font-medium whitespace-nowrap ${
                             expense.user_balance >= expense.total_amount 
                               ? 'text-green-600' 
                               : 'text-red-600'
@@ -884,7 +897,7 @@ export default function AdminPanel() {
                             {formatINR(expense.user_balance)}
                           </div>
                           {expense.user_balance < expense.total_amount && (
-                            <div className="text-xs text-red-500">
+                            <div className="text-xs text-red-500 whitespace-nowrap">
                               Insufficient balance
                             </div>
                           )}
@@ -892,41 +905,44 @@ export default function AdminPanel() {
                         <TableCell>
                           <StatusBadge status={expense.status as any} />
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="whitespace-nowrap text-sm text-right pr-4">
                           {format(new Date(expense.created_at), "MMM d, yyyy")}
                         </TableCell>
                         <TableCell className="text-right">
-                          {expense.status === "approved" || expense.status === "rejected" ? (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              disabled
-                              title={expense.status === "approved" ? "Expense is already approved" : "Expense is rejected"}
-                            >
-                              <Eye className="h-4 w-4 opacity-50" />
-                            </Button>
-                          ) : (
-                            <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-                              <DialogTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={async () => {
-                                    setSelectedExpense(expense);
-                                    setDialogOpen(true);
-                                    // Fetch attachments when opening dialog
-                                    if (expense.id) {
-                                      const { data: attData } = await supabase
-                                        .from("attachments")
-                                        .select("*")
-                                        .eq("expense_id", expense.id)
-                                        .order("created_at", { ascending: false });
-                                      setAttachments(attData || []);
-                                    }
-                                  }}
-                                >
-                                  <Eye className="h-4 w-4" />
-                                </Button>
+                          <div className="flex justify-end">
+                            {expense.status === "approved" || expense.status === "rejected" ? (
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                className="h-8 px-2 text-xs font-normal text-muted-foreground whitespace-nowrap"
+                                disabled
+                                title={expense.status === "approved" ? "Expense is already approved" : "Expense is rejected"}
+                              >
+                                View
+                              </Button>
+                            ) : (
+                              <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+                                <DialogTrigger asChild>
+                                  <Button
+                                    variant="default"
+                                    size="sm"
+                                    className="h-8 px-2 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white whitespace-nowrap"
+                                    onClick={async () => {
+                                      setSelectedExpense(expense);
+                                      setDialogOpen(true);
+                                      // Fetch attachments when opening dialog
+                                      if (expense.id) {
+                                        const { data: attData } = await supabase
+                                          .from("attachments")
+                                          .select("*")
+                                          .eq("expense_id", expense.id)
+                                          .order("created_at", { ascending: false });
+                                        setAttachments(attData || []);
+                                      }
+                                    }}
+                                  >
+                                    Review
+                                  </Button>
                               </DialogTrigger>
                               <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto sm:max-w-3xl md:max-w-4xl">
                               <DialogHeader>
@@ -1116,14 +1132,7 @@ export default function AdminPanel() {
                               </DialogContent>
                             </Dialog>
                           )}
-                          {/* Image Preview Dialog - outside the conditional */}
-                          <Dialog open={imagePreviewOpen} onOpenChange={setImagePreviewOpen}>
-                            <DialogContent className="max-w-3xl">
-                              {imagePreviewUrl && (
-                                <img src={imagePreviewUrl} alt="Attachment preview" className="w-full h-auto rounded" />
-                              )}
-                            </DialogContent>
-                          </Dialog>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -1133,6 +1142,14 @@ export default function AdminPanel() {
               )}
             </CardContent>
           </Card>
+          {/* Image Preview Dialog - outside the table */}
+          <Dialog open={imagePreviewOpen} onOpenChange={setImagePreviewOpen}>
+            <DialogContent className="max-w-3xl">
+              {imagePreviewUrl && (
+                <img src={imagePreviewUrl} alt="Attachment preview" className="w-full h-auto rounded" />
+              )}
+            </DialogContent>
+          </Dialog>
         </TabsContent>
 
         <TabsContent value="users" className="space-y-4">
@@ -1143,21 +1160,24 @@ export default function AdminPanel() {
             </CardHeader>
             <CardContent>
               {loading ? (
-                <p className="text-muted-foreground">Loading...</p>
+                <div className="min-h-[400px] flex items-center justify-center">
+                  <p className="text-muted-foreground">Loading...</p>
+                </div>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Email</TableHead>
-                      <TableHead>Role</TableHead>
-                      <TableHead>Engineer</TableHead>
-                      <TableHead>Balance</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Joined</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
+                <div className="overflow-x-auto">
+                  <Table className="table-fixed w-full">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-[15%]">Name</TableHead>
+                        <TableHead className="w-[18%]">Email</TableHead>
+                        <TableHead className="w-[10%]">Role</TableHead>
+                        <TableHead className="w-[15%]">Engineer</TableHead>
+                        <TableHead className="w-[12%]">Balance</TableHead>
+                        <TableHead className="w-[10%]">Status</TableHead>
+                        <TableHead className="w-[12%]">Joined</TableHead>
+                        <TableHead className="text-right w-[8%]">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
                   <TableBody>
                     {users.map((user) => (
                       <TableRow key={user.id}>
@@ -1243,6 +1263,7 @@ export default function AdminPanel() {
                     ))}
                   </TableBody>
                 </Table>
+                </div>
               )}
             </CardContent>
           </Card>

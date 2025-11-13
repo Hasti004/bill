@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, Filter, Download } from "lucide-react";
+import { Plus, Search, Filter, Download, ArrowLeft, MoreVertical, Eye, Edit } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
@@ -18,6 +18,15 @@ import {
 } from "@/components/ui/table";
 import { format } from "date-fns";
 import { formatINR } from "@/lib/format";
+import { useToast } from "@/hooks/use-toast";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface Expense {
   id: string;
@@ -31,7 +40,8 @@ interface Expense {
 }
 
 export default function Expenses() {
-  const { user } = useAuth();
+  const { user, userRole } = useAuth();
+  const { toast } = useToast();
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [filteredExpenses, setFilteredExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,13 +49,33 @@ export default function Expenses() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [sortBy, setSortBy] = useState("created_at");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  const [returnMoneyDialogOpen, setReturnMoneyDialogOpen] = useState(false);
+  const [returnAmount, setReturnAmount] = useState("");
+  const [returningMoney, setReturningMoney] = useState(false);
+  const [userBalance, setUserBalance] = useState<number | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
     if (user) {
       fetchExpenses();
+      fetchUserBalance();
     }
   }, [user]);
+
+  const fetchUserBalance = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("balance")
+        .eq("user_id", user?.id)
+        .single();
+
+      if (error) throw error;
+      setUserBalance(data?.balance ?? 0);
+    } catch (error) {
+      console.error("Error fetching user balance:", error);
+    }
+  };
 
   useEffect(() => {
     filterAndSortExpenses();
@@ -118,27 +148,222 @@ export default function Expenses() {
     setFilteredExpenses(filtered);
   };
 
+  // Helper function to escape CSV values
+  const escapeCSV = (value: any): string => {
+    if (value === null || value === undefined) return "";
+    const str = String(value);
+    // If value contains comma, quote, or newline, wrap in quotes and escape quotes
+    if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  };
+
   const exportExpenses = () => {
     const csvContent = [
-      ["Title", "Destination", "Start Date", "End Date", "Amount (INR)", "Status", "Created"],
+      ["Title", "Destination", "Start Date", "End Date", "Amount (INR)", "Status", "Created Date"],
       ...filteredExpenses.map(expense => [
-        expense.title,
-        expense.destination,
+        escapeCSV(expense.title),
+        escapeCSV(expense.destination),
         format(new Date(expense.trip_start), "yyyy-MM-dd"),
         format(new Date(expense.trip_end), "yyyy-MM-dd"),
-        formatINR(expense.total_amount),
-        expense.status,
+        Number(expense.total_amount).toFixed(2), // Raw number without formatting
+        escapeCSV(expense.status),
         format(new Date(expense.created_at), "yyyy-MM-dd")
       ])
     ].map(row => row.join(",")).join("\n");
 
-    const blob = new Blob([csvContent], { type: "text/csv" });
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = `expenses-${format(new Date(), "yyyy-MM-dd")}.csv`;
     a.click();
     window.URL.revokeObjectURL(url);
+  };
+
+  const handleReturnMoney = async () => {
+    if (!user || !userRole || userBalance === null) return;
+
+    const amount = parseFloat(returnAmount);
+    if (isNaN(amount) || amount <= 0) {
+      toast({
+        variant: "destructive",
+        title: "Invalid Amount",
+        description: "Please enter a valid amount greater than 0",
+      });
+      return;
+    }
+
+    if (amount > userBalance) {
+      toast({
+        variant: "destructive",
+        title: "Insufficient Balance",
+        description: `You only have ${formatINR(userBalance)}. Cannot return ${formatINR(amount)}`,
+      });
+      return;
+    }
+
+    try {
+      setReturningMoney(true);
+
+      // Determine target role and find target user
+      let targetRole: "cashier" | "admin" | null = null;
+      let targetUserId: string | null = null;
+
+      if (userRole === "engineer" || userRole === "employee") {
+        targetRole = "cashier";
+        
+        // Find the original cashier who assigned money to this employee
+        // Using FIFO (First In First Out) - return to the cashier who first assigned money
+        const { data: originalCashierId, error: assignmentError } = await supabase
+          .rpc('get_original_cashier', { recipient_user_id: user.id });
+
+        if (!assignmentError && originalCashierId) {
+          // Found the original cashier
+          targetUserId = originalCashierId as string;
+          console.log('Found original cashier for return:', targetUserId);
+        } else {
+          console.warn('Could not find original cashier, falling back to any cashier:', assignmentError);
+          // Fallback: Find any cashier if no assignment record exists
+          const { data: targetRoles, error: rolesError } = await supabase
+            .from("user_roles")
+            .select("user_id")
+            .eq("role", targetRole)
+            .limit(1);
+
+          if (rolesError) {
+            console.error("Error finding target role:", rolesError);
+            if (rolesError.message?.includes("permission") || rolesError.message?.includes("policy")) {
+              throw new Error(`Permission denied. Please ensure the database migration for return money feature has been applied.`);
+            }
+            throw rolesError;
+          }
+
+          if (!targetRoles || targetRoles.length === 0) {
+            throw new Error(`No ${targetRole} found in the system. Please contact an administrator.`);
+          }
+
+          targetUserId = targetRoles[0].user_id;
+        }
+      } else if (userRole === "cashier") {
+        targetRole = "admin";
+        
+        // For cashier returning to admin, find any admin
+        const { data: targetRoles, error: rolesError } = await supabase
+          .from("user_roles")
+          .select("user_id")
+          .eq("role", targetRole)
+          .limit(1);
+
+        if (rolesError) {
+          console.error("Error finding target role:", rolesError);
+          if (rolesError.message?.includes("permission") || rolesError.message?.includes("policy")) {
+            throw new Error(`Permission denied. Please ensure the database migration for return money feature has been applied.`);
+          }
+          throw rolesError;
+        }
+
+        if (!targetRoles || targetRoles.length === 0) {
+          throw new Error(`No ${targetRole} found in the system. Please contact an administrator.`);
+        }
+
+        targetUserId = targetRoles[0].user_id;
+      }
+
+      if (!targetRole || !targetUserId) {
+        throw new Error("Invalid role for returning money or target user not found");
+      }
+
+      // Get target user's current balance
+      const { data: targetProfile, error: targetError } = await supabase
+        .from("profiles")
+        .select("balance, name")
+        .eq("user_id", targetUserId)
+        .single();
+
+      if (targetError) throw targetError;
+
+      // Deduct from current user's balance
+      const newUserBalance = userBalance - amount;
+      const { error: userBalanceError } = await supabase
+        .from("profiles")
+        .update({ balance: newUserBalance })
+        .eq("user_id", user.id);
+
+      if (userBalanceError) throw userBalanceError;
+
+      // Add to target user's balance
+      const newTargetBalance = (targetProfile.balance || 0) + amount;
+      const { error: targetBalanceError } = await supabase
+        .from("profiles")
+        .update({ balance: newTargetBalance })
+        .eq("user_id", targetUserId);
+
+      if (targetBalanceError) throw targetBalanceError;
+
+      // Mark the money assignment as returned if employee/engineer is returning to cashier
+      if ((userRole === "engineer" || userRole === "employee") && targetRole === "cashier") {
+        // Find and mark the oldest unreturned assignment(s) as returned
+        // We'll mark assignments totaling the returned amount (FIFO)
+        let remainingAmount = amount;
+        
+        const { data: assignments, error: assignmentsError } = await supabase
+          .from("money_assignments")
+          .select("id, amount")
+          .eq("recipient_id", user.id)
+          .eq("cashier_id", targetUserId)
+          .eq("is_returned", false)
+          .order("assigned_at", { ascending: true });
+
+        if (!assignmentsError && assignments && assignments.length > 0) {
+          // Mark assignments as returned, starting from the oldest
+          for (const assignment of assignments) {
+            if (remainingAmount <= 0) break;
+            
+            const assignmentAmount = Math.min(Number(assignment.amount), remainingAmount);
+            
+            // Update the assignment to mark it as returned
+            const { error: updateError } = await supabase
+              .from("money_assignments")
+              .update({
+                is_returned: true,
+                returned_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", assignment.id);
+
+            if (updateError) {
+              console.error('Error marking assignment as returned:', updateError);
+              // Don't throw - this is tracking only, transaction already completed
+            } else {
+              console.log('Marked assignment as returned:', assignment.id, 'amount:', assignmentAmount);
+            }
+            
+            remainingAmount -= assignmentAmount;
+          }
+        }
+      }
+
+      // Update local state
+      setUserBalance(newUserBalance);
+      setReturnAmount("");
+      setReturnMoneyDialogOpen(false);
+
+      toast({
+        title: "Money Returned Successfully",
+        description: `Returned ${formatINR(amount)} to ${targetProfile.name || targetRole}. Your new balance: ${formatINR(newUserBalance)}`,
+      });
+    } catch (error: any) {
+      console.error("Error returning money:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Failed to return money. Please try again.",
+      });
+    } finally {
+      setReturningMoney(false);
+    }
   };
 
   return (
@@ -150,15 +375,70 @@ export default function Expenses() {
             Manage and track your expense submissions
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={exportExpenses}>
-            <Download className="mr-2 h-4 w-4" />
-            Export
-          </Button>
+        <div className="flex gap-2 flex-wrap">
+          {userRole === "admin" && (
+            <Button variant="outline" onClick={exportExpenses}>
+              <Download className="mr-2 h-4 w-4" />
+              Export CSV
+            </Button>
+          )}
           <Button onClick={() => navigate("/expenses/new")}>
             <Plus className="mr-2 h-4 w-4" />
-            New Expense
+            Add Expense
           </Button>
+          {(userRole === "engineer" || userRole === "employee" || userRole === "cashier") && (
+            <Dialog open={returnMoneyDialogOpen} onOpenChange={setReturnMoneyDialogOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline">
+                  <ArrowLeft className="mr-2 h-4 w-4" />
+                  Return Money
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Return Money</DialogTitle>
+                  <DialogDescription>
+                    {userRole === "cashier" 
+                      ? "Return money to admin. The amount will be deducted from your balance and added to an admin's account."
+                      : "Return money to cashier. The amount will be deducted from your balance and added to a cashier's account."}
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="return-amount">Amount to Return (INR)</Label>
+                    <Input
+                      id="return-amount"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={returnAmount}
+                      onChange={(e) => setReturnAmount(e.target.value)}
+                      placeholder="0.00"
+                    />
+                    {userBalance !== null && (
+                      <p className="text-sm text-muted-foreground">
+                        Your current balance: <span className="font-semibold">{formatINR(userBalance)}</span>
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setReturnMoneyDialogOpen(false);
+                      setReturnAmount("");
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button onClick={handleReturnMoney} disabled={returningMoney || !returnAmount}>
+                    {returningMoney ? "Returning..." : "Return Money"}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          )}
         </div>
       </div>
 
@@ -220,7 +500,9 @@ export default function Expenses() {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <p className="text-muted-foreground">Loading...</p>
+            <div className="min-h-[400px] flex items-center justify-center">
+              <p className="text-muted-foreground">Loading...</p>
+            </div>
           ) : expenses.length === 0 ? (
             <p className="text-muted-foreground">
               No expenses yet. Create your first expense claim to get started.
@@ -234,18 +516,19 @@ export default function Expenses() {
               <div className="mb-4 text-sm text-muted-foreground">
                 Showing {filteredExpenses.length} of {expenses.length} expenses
               </div>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Title</TableHead>
-                    <TableHead>Destination</TableHead>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Amount</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Created</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
+              <div className="overflow-x-auto">
+                <Table className="table-fixed w-full">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[20%]">Title</TableHead>
+                      <TableHead className="w-[18%]">Destination</TableHead>
+                      <TableHead className="w-[15%]">Date</TableHead>
+                      <TableHead className="w-[12%]">Amount</TableHead>
+                      <TableHead className="w-[12%]">Status</TableHead>
+                      <TableHead className="w-[13%]">Created</TableHead>
+                      <TableHead className="text-right w-[10%]">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
                 <TableBody>
                   {filteredExpenses.map((expense) => (
                   <TableRow key={expense.id}>
@@ -254,37 +537,42 @@ export default function Expenses() {
                     <TableCell>
                       {format(new Date(expense.trip_start), "MMM d, yyyy")}
                     </TableCell>
-                    <TableCell>{formatINR(expense.total_amount)}</TableCell>
+                    <TableCell className="whitespace-nowrap">{formatINR(expense.total_amount)}</TableCell>
                     <TableCell>
                       <StatusBadge status={expense.status as any} />
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="whitespace-nowrap">
                       {format(new Date(expense.created_at), "MMM d, yyyy")}
                     </TableCell>
                     <TableCell className="text-right">
-                      <div className="flex gap-2 justify-end">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => navigate(`/expenses/${expense.id}`)}
-                        >
-                          View
-                        </Button>
-                        {expense.status === "submitted" && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => navigate(`/expenses/${expense.id}/edit`)}
-                          >
-                            Edit
-                          </Button>
-                        )}
+                      <div className="flex justify-end">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                              <MoreVertical className="h-4 w-4" />
+                              <span className="sr-only">Open menu</span>
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => navigate(`/expenses/${expense.id}`)}>
+                              <Eye className="mr-2 h-4 w-4" />
+                              View
+                            </DropdownMenuItem>
+                            {expense.status === "submitted" && (
+                              <DropdownMenuItem onClick={() => navigate(`/expenses/${expense.id}/edit`)}>
+                                <Edit className="mr-2 h-4 w-4" />
+                                Edit
+                              </DropdownMenuItem>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
                     </TableCell>
                   </TableRow>
                 ))}
                 </TableBody>
               </Table>
+              </div>
             </>
           )}
         </CardContent>

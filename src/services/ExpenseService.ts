@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { Database } from "@/integrations/supabase/types";
+import { formatINR } from "@/lib/format";
 import { 
   notifyExpenseVerified, 
   notifyExpenseApproved, 
@@ -528,7 +529,7 @@ export class ExpenseService {
       // If expense amount > limit, they must verify instead
       if (expenseAmount > approvalLimit) {
         throw new Error(
-          `This expense (₹${expenseAmount.toFixed(2)}) exceeds the engineer approval limit of ₹${approvalLimit.toFixed(2)}. ` +
+          `This expense (${formatINR(expenseAmount)}) exceeds the engineer approval limit of ${formatINR(approvalLimit)}. ` +
           `Please verify this expense instead. It will be sent to admin for final approval.`
         );
       }
@@ -585,12 +586,8 @@ export class ExpenseService {
     const currentBalance = Number(profile?.balance ?? 0);
     const expenseAmount = Number(expense.total_amount);
     
-    // Check if user has sufficient balance
-    if (currentBalance < expenseAmount) {
-      throw new Error(
-        `Insufficient balance. Employee ${profile?.name} has ₹${currentBalance.toFixed(2)} but expense requires ₹${expenseAmount.toFixed(2)}. Please add balance before approving.`
-      );
-    }
+    // Allow negative balances - expense can be approved even if balance is insufficient
+    // The balance will go negative and can be compensated later when balance is added
 
     // Update expense
     const { data: updatedExpense, error: updateError } = await supabase
@@ -606,7 +603,7 @@ export class ExpenseService {
 
     if (updateError) throw updateError;
 
-    // Deduct employee balance
+    // Deduct employee balance (allows negative balance)
     const newBalance = currentBalance - expenseAmount;
     const { error: balanceUpdateError } = await supabase
       .from('profiles')
@@ -626,8 +623,9 @@ export class ExpenseService {
       throw new Error("Failed to deduct balance. Expense approval reverted.");
     }
 
-    // Log the action with balance information
-    const logComment = `${comment || ''} Balance deducted: ₹${expenseAmount.toFixed(2)}. Remaining balance: ₹${newBalance.toFixed(2)}`.trim();
+    // Log the action with balance information (handles negative balances)
+    const balanceStatus = newBalance < 0 ? `Negative balance: ${formatINR(Math.abs(newBalance))}` : `Remaining balance: ${formatINR(newBalance)}`;
+    const logComment = `${comment || ''} Balance deducted: ${formatINR(expenseAmount)}. ${balanceStatus}`.trim();
     await this.logAction(expenseId, approverId, "expense_approved", logComment);
 
     // Get approver name for notification

@@ -23,9 +23,12 @@ import {
 } from "@/components/ui/sidebar";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
+import { useUnreadNotifications } from "@/hooks/useUnreadNotifications";
+import { Badge } from "@/components/ui/badge";
 
 export function AppSidebar() {
   const { userRole, signOut } = useAuth();
+  const { unreadCount } = useUnreadNotifications();
 
   const employeeItems = [
     { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
@@ -99,8 +102,18 @@ export function AppSidebar() {
                       return `${baseClasses} text-sidebar-foreground hover:bg-gray-100 hover:text-gray-900`;
                     }}
                   >
-                    <item.icon className="h-4 w-4 flex-shrink-0" />
-                    <span className="truncate">{item.title}</span>
+                    <div className="relative flex-shrink-0">
+                      <item.icon className="h-4 w-4" />
+                      {item.title === "Notifications" && unreadCount > 0 && (
+                        <span className="absolute -top-1 -right-1 h-2.5 w-2.5 bg-red-500 rounded-full border-2 border-white dark:border-gray-900"></span>
+                      )}
+                    </div>
+                    <span className="truncate flex-1">{item.title}</span>
+                    {item.title === "Notifications" && unreadCount > 0 && (
+                      <Badge variant="destructive" className="ml-auto h-5 min-w-5 px-1.5 text-xs flex items-center justify-center">
+                        {unreadCount > 99 ? "99+" : unreadCount}
+                      </Badge>
+                    )}
                   </NavLink>
                 </SidebarMenuItem>
               ))}

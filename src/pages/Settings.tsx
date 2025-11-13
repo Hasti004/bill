@@ -310,6 +310,11 @@ export default function Settings() {
                 <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
                   <p className="text-xs text-blue-800">
                     ✓ Windows notifications are enabled. You'll see notifications in the Windows notification center when new updates arrive.
+                    {window.location.hostname === "localhost" && (
+                      <span className="block mt-1 text-blue-700">
+                        Note: Some browsers may restrict notifications on localhost. If notifications don't appear, try deploying to a production URL with HTTPS.
+                      </span>
+                    )}
                   </p>
                 </div>
               )}

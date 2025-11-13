@@ -19,7 +19,7 @@ import {
   CheckCircle, 
   XCircle, 
   Clock, 
-  DollarSign,
+  Coins,
   Eye,
   FileText,
   User,
@@ -361,7 +361,7 @@ export default function EngineerReview() {
 
       toast({
         title: "Expense Approved",
-        description: `Expense approved and ₹${selectedExpense.total_amount} deducted from employee balance.`,
+        description: `Expense approved and ${formatINR(selectedExpense.total_amount)} deducted from employee balance.`,
       });
 
       setSelectedExpense(null);
@@ -496,7 +496,7 @@ export default function EngineerReview() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Amount</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
+            <Coins className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{formatINR(stats.totalAmount)}</div>
@@ -569,7 +569,9 @@ export default function EngineerReview() {
             </div>
           </div>
           {loading ? (
-            <p className="text-muted-foreground">Loading...</p>
+            <div className="min-h-[400px] flex items-center justify-center">
+              <p className="text-muted-foreground">Loading...</p>
+            </div>
           ) : expenses.length === 0 ? (
             <div className="text-center py-8">
               <Receipt className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
@@ -579,62 +581,68 @@ export default function EngineerReview() {
               </p>
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Employee</TableHead>
-                  <TableHead>Title</TableHead>
-                  <TableHead>Destination</TableHead>
-                  <TableHead>Amount</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
+            <div className="overflow-x-auto">
+              <Table className="table-fixed w-full">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[12%]">Employee</TableHead>
+                    <TableHead className="w-[14%]">Title</TableHead>
+                    <TableHead className="w-[12%]">Destination</TableHead>
+                    <TableHead className="w-[10%]">Amount</TableHead>
+                    <TableHead className="w-[10%]">Status</TableHead>
+                    <TableHead className="w-[10%] whitespace-nowrap text-right pr-4">Created</TableHead>
+                    <TableHead className="text-right w-[12%]">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
               <TableBody>
                 {expenses.map((expense) => (
                   <TableRow key={expense.id}>
-                    <TableCell>
+                    <TableCell className="text-sm">
                       <div>
-                        <div className="font-medium">{expense.user_name}</div>
-                        <div className="text-sm text-muted-foreground">{expense.user_email}</div>
+                        <div className="font-medium truncate">{expense.user_name}</div>
+                        <div className="text-xs text-muted-foreground truncate">{expense.user_email}</div>
                       </div>
                     </TableCell>
-                    <TableCell className="font-medium">{expense.title}</TableCell>
-                    <TableCell>{expense.destination}</TableCell>
-                    <TableCell>{formatINR(expense.total_amount)}</TableCell>
+                    <TableCell className="font-medium text-sm">
+                      <div className="line-clamp-2 break-words">{expense.title}</div>
+                    </TableCell>
+                    <TableCell className="text-sm truncate">{expense.destination}</TableCell>
+                    <TableCell className="whitespace-nowrap text-sm">{formatINR(expense.total_amount)}</TableCell>
                     <TableCell>
                       <StatusBadge status={expense.status as any} />
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="whitespace-nowrap text-sm text-right pr-4">
                       {format(new Date(expense.created_at), "MMM d, yyyy")}
                     </TableCell>
                     <TableCell className="text-right">
-                      {expense.status === "approved" || expense.status === "rejected" ? (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled
-                          title={expense.status === "approved" ? "Expense is already approved" : "Expense is rejected"}
-                        >
-                          <Eye className="h-4 w-4 opacity-50" />
-                        </Button>
-                      ) : (
-                        <Dialog>
-                          <DialogTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={async () => {
-                                setSelectedExpense(expense);
-                                fetchExpenseDetails(expense.id);
-                                // Refresh the approval limit to get the latest value from admin settings
-                                await fetchEngineerApprovalLimit();
-                              }}
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                          </DialogTrigger>
+                      <div className="flex justify-end">
+                        {expense.status === "approved" || expense.status === "rejected" ? (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            className="h-8 px-2 text-xs font-normal text-muted-foreground whitespace-nowrap"
+                            disabled
+                            title={expense.status === "approved" ? "Expense is already approved" : "Expense is rejected"}
+                          >
+                            View
+                          </Button>
+                        ) : (
+                          <Dialog>
+                            <DialogTrigger asChild>
+                              <Button
+                                variant="default"
+                                size="sm"
+                                className="h-8 px-2 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white whitespace-nowrap"
+                                onClick={async () => {
+                                  setSelectedExpense(expense);
+                                  fetchExpenseDetails(expense.id);
+                                  // Refresh the approval limit to get the latest value from admin settings
+                                  await fetchEngineerApprovalLimit();
+                                }}
+                              >
+                                View/Approve
+                              </Button>
+                            </DialogTrigger>
                         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
                           <DialogHeader>
                             <DialogTitle>Expense Review</DialogTitle>
@@ -671,7 +679,7 @@ export default function EngineerReview() {
                                   <CardContent>
                                     <div className="space-y-2">
                                       <div className="flex items-center gap-2">
-                                        <DollarSign className="h-4 w-4 text-muted-foreground" />
+                                        <Coins className="h-4 w-4 text-muted-foreground" />
                                         <span className="text-lg font-semibold">
                                           {formatINR(selectedExpense.total_amount)}
                                         </span>
@@ -907,11 +915,13 @@ export default function EngineerReview() {
                           )}
                         </DialogContent>
                       </Dialog>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
+            </div>
           )}
         </CardContent>
       </Card>

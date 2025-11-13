@@ -24,7 +24,16 @@ import { z } from "zod";
 const expenseSchema = z.object({
   title: z.string().min(1, "Title is required"),
   destination: z.string().min(1, "Destination is required"),
-  expense_date: z.date(),
+  expense_date: z.date().refine(
+    (date) => {
+      const today = new Date();
+      today.setHours(23, 59, 59, 999); // End of today
+      return date <= today;
+    },
+    {
+      message: "Expense date cannot be in the future. Please select a past date or today.",
+    }
+  ),
   purpose: z.string().optional(),
   amount: z.number().positive("Amount must be greater than 0"),
   category: z.string().min(1, "Category is required"),
@@ -388,6 +397,12 @@ export default function ExpenseForm() {
                     selected={expense.expense_date}
                     onSelect={(date) => date && setExpense({ ...expense, expense_date: date })}
                     initialFocus
+                    disabled={(date) => {
+                      // Disable all future dates (dates after today)
+                      const today = new Date();
+                      today.setHours(23, 59, 59, 999); // End of today
+                      return date > today;
+                    }}
                   />
                 </PopoverContent>
               </Popover>

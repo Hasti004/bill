@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { X, CheckCircle, XCircle, Clock, AlertCircle, Bell, DollarSign } from "lucide-react";
+import { X, CheckCircle, XCircle, Clock, AlertCircle, Bell, Coins } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -69,7 +69,7 @@ export function NotificationPopup({
       case "expense_verified":
         return <AlertCircle className="h-5 w-5 text-yellow-600" />;
       case "balance_added":
-        return <DollarSign className="h-5 w-5 text-green-600" />;
+        return <Coins className="h-5 w-5 text-green-600" />;
       default:
         return <Bell className="h-5 w-5 text-gray-600" />;
     }

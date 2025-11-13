@@ -46,24 +46,80 @@ export default function Balances() {
     try {
       setLoading(true);
       
-      // Fetch profiles with roles
-      const { data: profilesData, error: profilesError } = await supabase
+      // If cashier, get their assigned engineer first
+      let cashierAssignedEngineerId: string | null = null;
+      if (userRole === 'cashier' && user?.id) {
+        const { data: cashierProfile } = await supabase
+          .from("profiles")
+          .select("cashier_assigned_engineer_id")
+          .eq("user_id", user.id)
+          .single();
+        
+        cashierAssignedEngineerId = cashierProfile?.cashier_assigned_engineer_id || null;
+        console.log('Cashier assigned engineer:', cashierAssignedEngineerId);
+      }
+      
+      // Fetch profiles first
+      let profilesQuery = supabase
         .from("profiles")
-        .select("user_id, name, email, balance")
+        .select("user_id, name, email, balance, reporting_engineer_id, cashier_assigned_engineer_id")
         .order("name", { ascending: true });
       
-      if (profilesError) throw profilesError;
+      // If cashier has assigned engineer, filter to only show employees under that engineer
+      if (userRole === 'cashier' && cashierAssignedEngineerId) {
+        // Cashier can only see:
+        // 1. Employees assigned to their engineer
+        // 2. The engineer they're assigned to
+        // 3. Other cashiers and admins (for reference)
+        // We'll filter this in the application layer after fetching roles
+        console.log('Filtering for cashier with assigned engineer:', cashierAssignedEngineerId);
+      }
       
-      // Fetch roles
-      const { data: rolesData, error: rolesError } = await supabase
-        .from("user_roles")
-        .select("user_id, role")
-        .order("role", { ascending: true });
+      const { data: profilesData, error: profilesError } = await profilesQuery;
       
-      if (rolesError) throw rolesError;
+      if (profilesError) {
+        console.error("Error fetching profiles:", profilesError);
+        throw profilesError;
+      }
       
-      // Create role map - prioritize admin, cashier, engineer over employee
-      // If user has multiple roles, show the most important one
+      console.log("Fetched profiles:", profilesData?.length || 0);
+      
+      // Get all user IDs
+      const userIds = (profilesData || []).map(p => p.user_id);
+      console.log("User IDs to fetch roles for:", userIds.length);
+      
+      // Fetch all roles for these users
+      let rolesByUserId: Record<string, string[]> = {};
+      if (userIds.length > 0) {
+        // Supabase .in() has a limit, so we might need to batch if there are many users
+        // But first try the direct query
+        const { data: rolesData, error: rolesError } = await supabase
+          .from("user_roles")
+          .select("user_id, role");
+        
+        if (rolesError) {
+          console.error("Error fetching roles:", rolesError);
+          // Don't throw - continue with empty roles
+          console.warn("Continuing without roles due to error");
+        } else {
+          console.log("Fetched all roles from database:", rolesData?.length || 0, rolesData);
+          
+          // Filter to only roles for users we care about, and group by user_id
+          (rolesData || []).forEach((r: any) => {
+            // Only process roles for users in our list
+            if (userIds.includes(r.user_id)) {
+              if (!rolesByUserId[r.user_id]) {
+                rolesByUserId[r.user_id] = [];
+              }
+              rolesByUserId[r.user_id].push(r.role);
+            }
+          });
+          
+          console.log("Roles filtered and grouped by user:", rolesByUserId);
+        }
+      }
+      
+      // Role priority - higher number = higher priority
       const rolePriority: { [key: string]: number } = {
         'admin': 4,
         'cashier': 3,
@@ -71,40 +127,88 @@ export default function Balances() {
         'employee': 1
       };
       
-      const roleMap = new Map<string, string>();
-      (rolesData || []).forEach((r: any) => {
-        const currentRole = roleMap.get(r.user_id);
-        const currentPriority = currentRole ? (rolePriority[currentRole] || 0) : 0;
-        const newPriority = rolePriority[r.role] || 0;
+      // Combine data and select highest priority role
+      let combinedData = (profilesData || []).map((r: any) => {
+        const userRoles = rolesByUserId[r.user_id] || [];
+        let highestPriorityRole = 'employee';
+        let highestPriority = 0;
         
-        // Keep the role with higher priority
-        if (!currentRole || newPriority > currentPriority) {
-          roleMap.set(r.user_id, r.role);
-        }
+        // Find the role with highest priority
+        userRoles.forEach((role: string) => {
+          const priority = rolePriority[role] || 0;
+          if (priority > highestPriority) {
+            highestPriority = priority;
+            highestPriorityRole = role;
+          }
+        });
+        
+        console.log(`User ${r.name} (${r.user_id}): roles=${JSON.stringify(userRoles)}, selected=${highestPriorityRole}`);
+        
+        return {
+          user_id: r.user_id,
+          name: r.name,
+          email: r.email,
+          balance: typeof r.balance === 'number' ? r.balance : 0,
+          role: highestPriorityRole,
+          reporting_engineer_id: r.reporting_engineer_id,
+          cashier_assigned_engineer_id: r.cashier_assigned_engineer_id,
+        };
       });
       
-      // Combine data
-      const combinedData = (profilesData || []).map((r: any) => ({
-        user_id: r.user_id,
-        name: r.name,
-        email: r.email,
-        balance: typeof r.balance === 'number' ? r.balance : 0,
-        role: roleMap.get(r.user_id) || 'employee',
-      }));
+      // Filter for cashiers: only show employees under their assigned engineer
+      if (userRole === 'cashier' && user?.id) {
+        // Get cashier's assigned engineer from the database directly
+        const { data: cashierProfileData } = await supabase
+          .from("profiles")
+          .select("cashier_assigned_engineer_id")
+          .eq("user_id", user.id)
+          .single();
+        
+        const cashierAssignedEngineerId = cashierProfileData?.cashier_assigned_engineer_id;
+        
+        if (cashierAssignedEngineerId) {
+          console.log('Filtering data for cashier with assigned engineer:', cashierAssignedEngineerId);
+          combinedData = combinedData.filter((row: any) => {
+            // Show ONLY:
+            // 1. The cashier themselves
+            // 2. The engineer they're assigned to (by user_id match)
+            // 3. Employees assigned to that engineer (by reporting_engineer_id match)
+            // DO NOT show: Admins, other cashiers, other engineers, employees from other zones
+            
+            // Show cashier themselves
+            if (row.user_id === user.id) return true;
+            
+            // Show assigned engineer (must match by user_id)
+            if (row.user_id === cashierAssignedEngineerId && row.role === 'engineer') return true;
+            
+            // Show employees under assigned engineer (must have matching reporting_engineer_id)
+            if (row.role === 'employee' && row.reporting_engineer_id === cashierAssignedEngineerId) return true;
+            
+            // Hide everything else: admins, other cashiers, other engineers, other employees
+            return false;
+          });
+          console.log('Filtered data for cashier:', combinedData.length, 'rows');
+        } else {
+          // If cashier has no assigned engineer, show all (backward compatibility)
+          console.log('Cashier has no assigned engineer - showing all users');
+        }
+      }
       
+      console.log("Final combined data:", combinedData);
       setRows(combinedData);
       
       // If user is cashier, fetch their balance
       if (userRole === 'cashier' && user?.id) {
-        console.log('Cashier user ID:', user.id);
-        console.log('Available profiles:', combinedData.map(p => ({ user_id: p.user_id, name: p.name, balance: p.balance })));
         const cashierProfile = combinedData.find(p => p.user_id === user.id);
-        console.log('Found cashier profile:', cashierProfile);
         setCashierBalance(cashierProfile?.balance || 0);
-        console.log('Set cashier balance to:', cashierProfile?.balance || 0);
       }
     } catch (e: any) {
       console.error("Error loading balances", e);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to load user balances",
+      });
     } finally {
       setLoading(false);
     }
@@ -132,8 +236,49 @@ export default function Balances() {
       
       console.log('Current user balance:', currentRow.balance);
       
-      // If cashier is adding funds, check if they have sufficient balance and deduct from their account
+      // Prevent cashier from adding money to admin
+      if (userRole === 'cashier' && currentRow.role === 'admin') {
+        toast({
+          variant: "destructive",
+          title: "Action Not Allowed",
+          description: "Cashiers cannot add balance to administrators.",
+        });
+        setSavingId(null);
+        return;
+      }
+      
+      // If cashier is adding funds, validate they can manage this employee
       if (userRole === 'cashier' && amountToAdd > 0 && user?.id) {
+        // Check if cashier can manage this employee (must be under their assigned engineer)
+        const cashierProfile = rows.find(r => r.user_id === user.id);
+        const cashierAssignedEngineerId = (cashierProfile as any)?.cashier_assigned_engineer_id;
+        
+        if (cashierAssignedEngineerId) {
+          // Cashier has assigned engineer - check if employee is under that engineer
+          const employeeEngineerId = (currentRow as any)?.reporting_engineer_id;
+          
+          if (currentRow.role === 'employee' && employeeEngineerId !== cashierAssignedEngineerId) {
+            toast({
+              variant: "destructive",
+              title: "Access Denied",
+              description: "You can only manage employees under your assigned engineer's zone/department.",
+            });
+            setSavingId(null);
+            return;
+          }
+          
+          if (currentRow.role === 'engineer' && currentRow.user_id !== cashierAssignedEngineerId) {
+            toast({
+              variant: "destructive",
+              title: "Access Denied",
+              description: "You can only manage your assigned engineer.",
+            });
+            setSavingId(null);
+            return;
+          }
+        }
+        
+        // Check if they have sufficient balance and deduct from their account
         console.log('Cashier balance check - Current balance:', cashierBalance, 'Amount to add:', amountToAdd);
         if (cashierBalance < amountToAdd) {
           console.log('Insufficient balance - need:', amountToAdd, 'have:', cashierBalance);
@@ -190,6 +335,51 @@ export default function Balances() {
       
       console.log('User balance updated successfully:', data);
       
+      // Record money assignment if cashier is adding money to an employee/engineer
+      // This tracks the path: cashier -> employee, so money can be returned to the same cashier
+      if (userRole === 'cashier' && user?.id && amountToAdd > 0) {
+        // Check if recipient is an employee or engineer (not admin or cashier)
+        const recipientRole = currentRow.role;
+        if (recipientRole === 'employee' || recipientRole === 'engineer') {
+          // Verify cashier can manage this employee (respects zone/department assignment)
+          const cashierProfile = rows.find(r => r.user_id === user.id);
+          const cashierAssignedEngineerId = (cashierProfile as any)?.cashier_assigned_engineer_id;
+          
+          // Only record if:
+          // 1. Cashier has no assigned engineer (can manage all - backward compatibility)
+          // 2. OR employee is under cashier's assigned engineer
+          // 3. OR recipient is the cashier's assigned engineer
+          let shouldRecord = true;
+          if (cashierAssignedEngineerId) {
+            if (recipientRole === 'employee') {
+              const employeeEngineerId = (currentRow as any)?.reporting_engineer_id;
+              shouldRecord = employeeEngineerId === cashierAssignedEngineerId;
+            } else if (recipientRole === 'engineer') {
+              shouldRecord = userId === cashierAssignedEngineerId;
+            }
+          }
+          
+          if (shouldRecord) {
+            // Record the assignment
+            const { error: assignmentError } = await supabase
+              .from("money_assignments")
+              .insert({
+                cashier_id: user.id,
+                recipient_id: userId,
+                amount: amountToAdd,
+              });
+
+            if (assignmentError) {
+              console.error('Error recording money assignment:', assignmentError);
+              // Don't throw error - assignment recording is not critical for the transaction
+              // But log it for debugging
+            } else {
+              console.log('Money assignment recorded: cashier', user.id, '-> employee', userId, 'amount:', amountToAdd);
+            }
+          }
+        }
+      }
+      
       // Get cashier/admin name for notification
       const { data: adderProfile } = await supabase
         .from("profiles")
@@ -206,9 +396,18 @@ export default function Balances() {
         );
       }
       
+      // Check if balance was negative and is now compensated
+      const wasNegative = (currentRow.balance || 0) < 0;
+      const isNowPositive = newBalance >= 0;
+      const compensationMessage = wasNegative && isNowPositive 
+        ? ` Added ${formatINR(amountToAdd)}. Negative balance compensated. New balance: ${formatINR(newBalance)}`
+        : wasNegative
+        ? ` Added ${formatINR(amountToAdd)}. Balance: ${formatINR(newBalance)} (still negative)`
+        : ` Added ${formatINR(amountToAdd)}. New balance: ${formatINR(newBalance)}`;
+      
       toast({ 
         title: "Amount added", 
-        description: `Added ${formatINR(amountToAdd)} to ${currentRow.name}'s account` 
+        description: `${currentRow.name}'s account:${compensationMessage}` 
       });
       
       // Update both recipient's balance and cashier's balance in the rows state
@@ -374,19 +573,22 @@ export default function Balances() {
             </div>
           </div>
           {loading ? (
-            <p className="text-muted-foreground">Loading...</p>
+            <div className="min-h-[400px] flex items-center justify-center">
+              <p className="text-muted-foreground">Loading...</p>
+            </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead className="text-right">Current Balance</TableHead>
-                  <TableHead className="text-right">Add Amount</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
+            <div className="overflow-x-auto">
+              <Table className="table-fixed w-full">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[15%]">Name</TableHead>
+                    <TableHead className="w-[20%]">Email</TableHead>
+                    <TableHead className="w-[12%]">Role</TableHead>
+                    <TableHead className="text-right w-[18%]">Current Balance</TableHead>
+                    <TableHead className="text-right w-[20%]">Add Amount</TableHead>
+                    <TableHead className="text-right w-[15%]">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
               <TableBody>
                 {rows.length === 0 ? (
                   <TableRow>
@@ -420,13 +622,15 @@ export default function Balances() {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">
-                      <span className="font-medium">{formatINR(r.balance || 0)}</span>
+                      <span className={`font-medium whitespace-nowrap ${(r.balance || 0) < 0 ? 'text-red-600' : ''}`}>
+                        {formatINR(r.balance || 0)}
+                      </span>
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-2">
                         <Input
                           type="number"
-                          className="w-32 h-9"
+                          className="w-32 h-9 min-w-[120px]"
                           placeholder="Add amount"
                           value={addAmounts[r.user_id] || ''}
                           onChange={(e) => {
@@ -435,26 +639,29 @@ export default function Balances() {
                           }}
                           disabled={userRole === 'cashier' && user?.id === r.user_id}
                         />
-                        <span className="text-xs text-muted-foreground">INR</span>
+                        <span className="text-xs text-muted-foreground whitespace-nowrap">INR</span>
                       </div>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        size="sm"
-                        disabled={savingId === r.user_id || (userRole === 'cashier' && user?.id === r.user_id)}
-                        onClick={() => {
-                          console.log('Button clicked for user:', r.user_id, 'userRole:', userRole);
-                          const amountToAdd = addAmounts[r.user_id] || 0;
-                          console.log('Amount to add:', amountToAdd);
-                          if (amountToAdd > 0) {
-                            addAmountToUser(r.user_id, amountToAdd);
-                          } else {
-                            toast({ variant: "destructive", title: "Error", description: "Please enter an amount to add" });
-                          }
-                        }}
-                      >
-                        {savingId === r.user_id ? "Adding..." : "Add"}
-                      </Button>
+                      <div className="flex justify-end">
+                        <Button
+                          size="sm"
+                          className="w-20 min-w-[80px]"
+                          disabled={savingId === r.user_id || (userRole === 'cashier' && user?.id === r.user_id)}
+                          onClick={() => {
+                            console.log('Button clicked for user:', r.user_id, 'userRole:', userRole);
+                            const amountToAdd = addAmounts[r.user_id] || 0;
+                            console.log('Amount to add:', amountToAdd);
+                            if (amountToAdd > 0) {
+                              addAmountToUser(r.user_id, amountToAdd);
+                            } else {
+                              toast({ variant: "destructive", title: "Error", description: "Please enter an amount to add" });
+                            }
+                          }}
+                        >
+                          {savingId === r.user_id ? "Adding..." : "Add"}
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                     ))
@@ -462,6 +669,7 @@ export default function Balances() {
                 })()}
               </TableBody>
             </Table>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -546,7 +754,9 @@ export default function Balances() {
                           <div className="text-sm text-muted-foreground">{r.email}</div>
                         </div>
                         <div className="text-right">
-                          <div className="text-sm font-medium">{formatINR(r.balance || 0)}</div>
+                          <div className={`text-sm font-medium ${(r.balance || 0) < 0 ? 'text-red-600' : ''}`}>
+                            {formatINR(r.balance || 0)}
+                          </div>
                           <Badge variant="outline" className="text-xs mt-1">
                             {r.role}
                           </Badge>

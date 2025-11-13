@@ -110,7 +110,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
                     <span className={`text-sm font-medium ${
                       userRole === 'cashier' ? 'text-purple-700' : 'text-green-700'
                     }`}>
-                      {formatINR(userBalance)}
+                      <span className={userBalance < 0 ? 'text-red-600' : ''}>
+                        {formatINR(userBalance)}
+                      </span>
                     </span>
                   </div>
                 )}

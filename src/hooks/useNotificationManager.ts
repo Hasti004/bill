@@ -84,27 +84,55 @@ export function useNotificationManager() {
   };
 
   const showDesktopNotification = (notification: Notification) => {
-    if ("Notification" in window && Notification.permission === "granted") {
-      const desktopNotif = new Notification(notification.title, {
-        body: notification.message,
-        icon: "/favicon.ico",
-        badge: "/favicon.ico",
-        tag: notification.id,
-        requireInteraction: false,
-        silent: !settings.sound_enabled,
-        timestamp: new Date(notification.created_at).getTime(),
-      });
+    // Check if browser supports notifications
+    if (!("Notification" in window)) {
+      console.log("This browser does not support desktop notifications");
+      return;
+    }
 
-      // Make notification clickable - navigate to expense if available
-      desktopNotif.onclick = () => {
-        window.focus();
-        if (notification.expense_id) {
-          navigate(`/expenses/${notification.expense_id}`);
-        } else {
-          navigate("/notifications");
+    // Check permission
+    if (Notification.permission === "granted") {
+      try {
+        const desktopNotif = new Notification(notification.title, {
+          body: notification.message,
+          icon: window.location.origin + "/favicon.ico",
+          badge: window.location.origin + "/favicon.ico",
+          tag: notification.id,
+          requireInteraction: false,
+          silent: !settings.sound_enabled,
+          timestamp: new Date(notification.created_at).getTime(),
+          dir: "ltr",
+        });
+
+        // Make notification clickable - navigate to expense if available
+        desktopNotif.onclick = (event) => {
+          event.preventDefault();
+          window.focus();
+          if (notification.expense_id) {
+            navigate(`/expenses/${notification.expense_id}`);
+          } else {
+            navigate("/notifications");
+          }
+          desktopNotif.close();
+        };
+
+        // Auto-close after 5 seconds
+        setTimeout(() => {
+          desktopNotif.close();
+        }, 5000);
+      } catch (error) {
+        console.error("Error showing desktop notification:", error);
+      }
+    } else if (Notification.permission === "default") {
+      // Request permission if not yet asked
+      Notification.requestPermission().then((permission) => {
+        if (permission === "granted") {
+          // Retry showing notification
+          showDesktopNotification(notification);
         }
-        desktopNotif.close();
-      };
+      });
+    } else {
+      console.log("Notification permission denied");
     }
   };
 
