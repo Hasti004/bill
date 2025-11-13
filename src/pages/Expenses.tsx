@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, Filter, Download, ArrowLeft, MoreVertical, Eye, Edit } from "lucide-react";
+import { Plus, Search, Filter, Download, ArrowLeft, MoreVertical, Eye, Edit, Trash2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
@@ -20,6 +20,7 @@ import { format } from "date-fns";
 import { formatINR } from "@/lib/format";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Label } from "@/components/ui/label";
 import {
   DropdownMenu,
@@ -53,6 +54,9 @@ export default function Expenses() {
   const [returnAmount, setReturnAmount] = useState("");
   const [returningMoney, setReturningMoney] = useState(false);
   const [userBalance, setUserBalance] = useState<number | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [expenseToDelete, setExpenseToDelete] = useState<Expense | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -366,6 +370,107 @@ export default function Expenses() {
     }
   };
 
+  const handleDeleteExpense = async () => {
+    if (!expenseToDelete || !user) return;
+
+    try {
+      setDeleting(true);
+
+      // Verify expense belongs to user and is submitted
+      const { data: expenseData, error: fetchError } = await supabase
+        .from("expenses")
+        .select("id, status, user_id")
+        .eq("id", expenseToDelete.id)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      // Verify ownership
+      if (expenseData.user_id !== user.id) {
+        throw new Error("You don't have permission to delete this expense");
+      }
+
+      // Verify status is submitted
+      if (expenseData.status !== "submitted") {
+        throw new Error("Only submitted expenses can be deleted");
+      }
+
+      // Delete attachments from storage
+      const { data: attachments } = await supabase
+        .from("attachments")
+        .select("file_url")
+        .eq("expense_id", expenseToDelete.id);
+
+      if (attachments && attachments.length > 0) {
+        // Extract file paths from URLs and delete from storage
+        for (const attachment of attachments) {
+          try {
+            // Extract path from URL (format: /storage/v1/object/public/receipts/{path})
+            const url = attachment.file_url;
+            if (url) {
+              const urlMatch = url.match(/\/storage\/v1\/object\/public\/receipts\/(.+)$/);
+              if (urlMatch) {
+                const filePath = urlMatch[1];
+                await supabase.storage
+                  .from("receipts")
+                  .remove([filePath]);
+              }
+            }
+          } catch (error) {
+            console.error("Error deleting attachment file:", error);
+            // Continue even if file deletion fails
+          }
+        }
+      }
+
+      // Delete attachment records
+      await supabase
+        .from("attachments")
+        .delete()
+        .eq("expense_id", expenseToDelete.id);
+
+      // Delete expense logs (table is named audit_logs in the database)
+      await supabase
+        .from("audit_logs")
+        .delete()
+        .eq("expense_id", expenseToDelete.id);
+
+      // Delete the expense itself
+      const { error: deleteError } = await supabase
+        .from("expenses")
+        .delete()
+        .eq("id", expenseToDelete.id);
+
+      if (deleteError) {
+        console.error("Delete error details:", deleteError);
+        // Check if it's an RLS policy error
+        if (deleteError.message?.includes("policy") || deleteError.message?.includes("permission")) {
+          throw new Error("You don't have permission to delete this expense. Please ensure the expense is in 'submitted' status and belongs to you. If the issue persists, you may need to apply the database migration: 20250119000000_allow_users_delete_submitted_expenses.sql");
+        }
+        throw deleteError;
+      }
+
+      toast({
+        title: "Expense Deleted",
+        description: `Expense "${expenseToDelete.title}" has been deleted successfully`,
+      });
+
+      // Refresh expenses list
+      await fetchExpenses();
+      setDeleteDialogOpen(false);
+      setExpenseToDelete(null);
+    } catch (error: any) {
+      console.error("Error deleting expense:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Failed to delete expense",
+      });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <div className="space-y-8">
       <div className="flex justify-between items-center">
@@ -559,10 +664,22 @@ export default function Expenses() {
                               View
                             </DropdownMenuItem>
                             {expense.status === "submitted" && (
-                              <DropdownMenuItem onClick={() => navigate(`/expenses/${expense.id}/edit`)}>
-                                <Edit className="mr-2 h-4 w-4" />
-                                Edit
-                              </DropdownMenuItem>
+                              <>
+                                <DropdownMenuItem onClick={() => navigate(`/expenses/${expense.id}/edit`)}>
+                                  <Edit className="mr-2 h-4 w-4" />
+                                  Edit
+                                </DropdownMenuItem>
+                                <DropdownMenuItem 
+                                  onClick={() => {
+                                    setExpenseToDelete(expense);
+                                    setDeleteDialogOpen(true);
+                                  }}
+                                  className="text-red-600 focus:text-red-600"
+                                >
+                                  <Trash2 className="mr-2 h-4 w-4" />
+                                  Delete
+                                </DropdownMenuItem>
+                              </>
                             )}
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -577,6 +694,35 @@ export default function Expenses() {
           )}
         </CardContent>
       </Card>
+
+      {/* Delete Expense Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Expense</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete the expense "{expenseToDelete?.title}"?
+              <br /><br />
+              This action cannot be undone. All attachments and related data will be permanently removed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => {
+              setDeleteDialogOpen(false);
+              setExpenseToDelete(null);
+            }}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteExpense}
+              className="bg-red-600 hover:bg-red-700"
+              disabled={deleting}
+            >
+              {deleting ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

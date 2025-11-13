@@ -118,12 +118,13 @@ export class ExpenseService {
       throw new Error("Only submitted expenses can be edited. Verified or approved expenses cannot be modified.");
     }
 
-    const totalAmount = currentExpense.total_amount;
+    const totalAmount = typeof data.amount === 'number' ? data.amount : currentExpense.total_amount;
 
-    // Update expense
+    // Update expense - exclude 'amount' from spread since expenses table uses 'total_amount'
+    const { amount, ...dataWithoutAmount } = data;
     const updateData: ExpenseUpdate = {
-      ...data,
-      total_amount: typeof data.amount === 'number' ? data.amount : totalAmount,
+      ...dataWithoutAmount,
+      total_amount: totalAmount,
       updated_at: new Date().toISOString(),
     };
 

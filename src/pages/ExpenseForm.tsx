@@ -119,6 +119,20 @@ export default function ExpenseForm() {
 
       setCurrentExpenseId(expenseData.id);
 
+      // Fetch existing attachments for this expense
+      const { data: attachmentsData, error: attachmentsError } = await supabase
+        .from("attachments")
+        .select("file_url")
+        .eq("expense_id", id);
+
+      if (!attachmentsError && attachmentsData) {
+        // Load existing attachments into state
+        const existingAttachmentUrls = attachmentsData
+          .map(att => att.file_url)
+          .filter(url => url) as string[];
+        setAttachments(existingAttachmentUrls);
+      }
+
       // no line items fetch
     } catch (error) {
       console.error("Error fetching expense:", error);
@@ -258,8 +272,31 @@ export default function ExpenseForm() {
       });
 
       // Check if bill photos are uploaded for submission
-      if (attachments.length === 0) {
+      if (!isEditing && attachments.length === 0) {
+        // For new expenses, require attachments
         throw new Error("Bill photos are required for expense submission. Please upload at least one photo of your receipt or bill.");
+      }
+      
+      // For editing, check if there are any attachments (existing in DB or new temp files)
+      if (isEditing && id) {
+        // Fetch current attachments count from database
+        const { data: existingAttachments } = await supabase
+          .from("attachments")
+          .select("id")
+          .eq("expense_id", id);
+        
+        // Check for temp files that will be moved
+        const { data: tempFiles } = await supabase.storage
+          .from('receipts')
+          .list(`temp/${user.id}`, { limit: 100 });
+        
+        const existingCount = existingAttachments?.length || 0;
+        const newTempFilesCount = tempFiles?.length || 0;
+        const totalAttachments = existingCount + newTempFilesCount;
+        
+        if (totalAttachments === 0) {
+          throw new Error("Bill photos are required for expense submission. Please upload at least one photo of your receipt or bill.");
+        }
       }
 
       // Prepare data for ExpenseService
@@ -278,6 +315,10 @@ export default function ExpenseForm() {
       if (isEditing && id) {
         // Update existing expense
         await ExpenseService.updateExpense(id, user.id, expenseData);
+        
+        // Move any temp files to the expense folder (for newly uploaded files during edit)
+        await moveTempFilesToExpense(id);
+        
         // Submit the expense (this will handle status change to submitted)
         await ExpenseService.submitExpense(id, user.id);
       } else {
