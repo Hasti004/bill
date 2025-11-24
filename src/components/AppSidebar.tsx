@@ -80,8 +80,11 @@ export function AppSidebar() {
         {/* Mobile-optimized Header */}
         <div className="px-4 sm:px-6 py-3 sm:py-4">
           <div className="flex items-center gap-2">
-            <Receipt className="h-5 w-5 sm:h-6 sm:w-6 text-primary flex-shrink-0" />
-            <span className="font-bold text-base sm:text-lg truncate">ExpenseTracker</span>
+            <img 
+              src="/HERO.png" 
+              alt="Hero" 
+              className="h-8 sm:h-10 w-auto flex-shrink-0"
+            />
           </div>
         </div>
 

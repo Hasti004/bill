@@ -86,13 +86,20 @@ export function Layout({ children }: { children: React.ReactNode }) {
           <header className="border-b bg-white/80 backdrop-blur-md supports-[backdrop-filter]:bg-white/60 shadow-sm sticky top-0 z-30">
             <div className="flex h-14 sm:h-16 items-center gap-2 sm:gap-4 px-3 sm:px-6">
               <SidebarTrigger className="hover:bg-gray-100 rounded-lg p-2 transition-colors flex-shrink-0" />
-              <div className="flex-1 min-w-0">
-                <h1 className="text-sm sm:text-base font-semibold text-gray-900 truncate">
-                  Expense Management
-                </h1>
-                <p className="text-xs text-gray-500 hidden sm:block">
-                  Expense Management System
-                </p>
+              <div className="flex-1 min-w-0 flex items-center gap-3">
+                <img 
+                  src="/HERO.png" 
+                  alt="Hero" 
+                  className="h-6 sm:h-8 w-auto hidden sm:block"
+                />
+                <div className="flex-1 min-w-0">
+                  <h1 className="text-sm sm:text-base font-semibold text-gray-900 truncate">
+                    Expense Management
+                  </h1>
+                  <p className="text-xs text-gray-500 hidden sm:block">
+                    Expense Management System
+                  </p>
+                </div>
               </div>
               
               {/* User Profile Section */}

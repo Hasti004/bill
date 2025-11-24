@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 // Removed signup: tabs no longer needed
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Receipt } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { z } from "zod";
 
 const authSchema = z.object({
@@ -73,9 +73,11 @@ export default function Auth() {
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <div className="flex justify-center mb-4">
-            <div className="rounded-full bg-primary p-3">
-              <Receipt className="h-8 w-8 text-primary-foreground" />
-            </div>
+            <img 
+              src="/HERO.png" 
+              alt="Hero" 
+              className="h-16 w-auto"
+            />
           </div>
           <CardTitle className="text-2xl">Expense Manager</CardTitle>
           <CardDescription>
