@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { UserPlus, Mail, User, Shield, Settings, Sparkles, CheckCircle, AlertCircle, Edit, Trash2, Eye, EyeOff, Search, Lock, Copy, Check } from "lucide-react";
+import { UserPlus, Mail, User, Shield, Settings, Sparkles, CheckCircle, AlertCircle, Edit, Trash2, Eye, EyeOff, Search, Lock, Copy, Check, Table2, Network } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { z } from "zod";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
@@ -31,6 +31,7 @@ interface CreateUserForm {
   role: "admin" | "engineer" | "employee" | "cashier";
   password: string;
   reportingEngineerId?: string | "none";
+  cashierAssignedEngineerId?: string | "none";
 }
 
 export default function UserManagement() {
@@ -53,6 +54,7 @@ export default function UserManagement() {
     role: "employee",
     password: "",
     reportingEngineerId: "none",
+    cashierAssignedEngineerId: "none",
   });
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -79,6 +81,7 @@ export default function UserManagement() {
   const [resetPasswordSuccessOpen, setResetPasswordSuccessOpen] = useState(false);
   const [resetPasswordValue, setResetPasswordValue] = useState("");
   const [passwordCopied, setPasswordCopied] = useState(false);
+  const [viewMode, setViewMode] = useState<"table" | "hierarchical">("table");
 
   useEffect(() => {
     // Load engineers for assignment dropdown
@@ -183,6 +186,62 @@ export default function UserManagement() {
     };
     loadUsers();
   }, []);
+
+  // Build hierarchy structure from users
+  const buildHierarchy = () => {
+    // Get all engineers
+    const engineerUsers = users.filter(u => u.role === "engineer");
+    
+    // Build a map of engineer name to engineer user_id for matching
+    const engineerNameToId: Record<string, string> = {};
+    engineerUsers.forEach(e => {
+      engineerNameToId[e.name] = e.user_id;
+    });
+    
+    // Build hierarchy: Engineer -> Cashier -> Employee
+    const hierarchy = engineerUsers.map(engineer => {
+      // Get cashiers assigned to this engineer (match by name)
+      const cashiers = users.filter(u => 
+        u.role === "cashier" && 
+        u.cashier_assigned_engineer_name === engineer.name
+      );
+      
+      // Get employees assigned to this engineer (match by name)
+      const employees = users.filter(u => 
+        u.role === "employee" && 
+        u.assigned_engineer_name === engineer.name
+      );
+      
+      return {
+        engineer: {
+          ...engineer,
+          cashierCount: cashiers.length,
+          employeeCount: employees.length,
+        },
+        cashiers: cashiers,
+        employees: employees,
+      };
+    });
+    
+    // Also include unassigned users
+    const unassignedCashiers = users.filter(u => 
+      u.role === "cashier" && !u.cashier_assigned_engineer_name
+    );
+    const unassignedEmployees = users.filter(u => 
+      u.role === "employee" && !u.assigned_engineer_name
+    );
+    const admins = users.filter(u => u.role === "admin");
+    
+    return {
+      hierarchy,
+      unassignedCashiers,
+      unassignedEmployees,
+      admins,
+      totalEngineers: engineerUsers.length,
+      totalCashiers: users.filter(u => u.role === "cashier").length,
+      totalEmployees: users.filter(u => u.role === "employee").length,
+    };
+  };
 
   const openUserDrawer = async (u: { user_id: string; name: string; email: string; balance: number; role: string }) => {
     setSelectedUser(u);
@@ -322,6 +381,16 @@ export default function UserManagement() {
         if (profileUpdateError) throw profileUpdateError;
       }
 
+      // If creating a cashier and an engineer is chosen, link them
+      if (validated.role === "cashier" && formData.cashierAssignedEngineerId && formData.cashierAssignedEngineerId !== "none") {
+        const { error: profileUpdateError } = await supabase
+          .from("profiles")
+          .update({ cashier_assigned_engineer_id: formData.cashierAssignedEngineerId })
+          .eq("user_id", authData.user.id);
+
+        if (profileUpdateError) throw profileUpdateError;
+      }
+
       toast({
         title: "User Created Successfully",
         description: `${validated.name} has been created as ${validated.role}. They will receive an email to confirm their account.`,
@@ -334,6 +403,7 @@ export default function UserManagement() {
         role: "employee",
         password: "",
         reportingEngineerId: "none",
+        cashierAssignedEngineerId: "none",
       });
       setShowPassword(false);
 
@@ -808,8 +878,15 @@ export default function UserManagement() {
     );
   }
 
+  const scrollToCreateUser = () => {
+    const element = document.getElementById('create-user-section');
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
   return (
-    <div className="space-y-4 sm:space-y-6 lg:space-y-8">
+    <div className="space-y-4 sm:space-y-6 lg:space-y-8 relative">
       {/* Mobile-optimized Header Section */}
       <div className="text-center space-y-3 sm:space-y-4">
         <div className="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl sm:rounded-2xl shadow-lg">
@@ -826,8 +903,40 @@ export default function UserManagement() {
       {/* Users List Card */}
         <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm">
           <CardHeader className="p-6">
-            <CardTitle className="text-xl font-bold">All Users</CardTitle>
-            <CardDescription>Click a user to view full details and expense history</CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-xl font-bold">All Users</CardTitle>
+                <CardDescription>Click a user to view full details and expense history</CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={scrollToCreateUser}
+                  className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white transition-colors duration-150"
+                  size="sm"
+                >
+                  <UserPlus className="h-4 w-4 mr-2" />
+                  Create User
+                </Button>
+                <Button
+                  variant={viewMode === "table" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setViewMode("table")}
+                  className="flex items-center gap-2"
+                >
+                  <Table2 className="h-4 w-4" />
+                  Table
+                </Button>
+                <Button
+                  variant={viewMode === "hierarchical" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setViewMode("hierarchical")}
+                  className="flex items-center gap-2"
+                >
+                  <Network className="h-4 w-4" />
+                  Hierarchy
+                </Button>
+              </div>
+            </div>
           </CardHeader>
           <CardContent className="p-6 pt-0">
             {/* Search Bar */}
@@ -844,19 +953,21 @@ export default function UserManagement() {
             </div>
           </CardContent>
           <CardContent className="p-0 pt-0">
+            {viewMode === "table" ? (
             <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead className="bg-slate-50 text-left">
-                  <tr>
-                    <th className="px-4 py-3 font-semibold text-slate-700">Name</th>
-                    <th className="px-4 py-3 font-semibold text-slate-700">Email</th>
-                    <th className="px-4 py-3 font-semibold text-slate-700">Role</th>
-                    <th className="px-4 py-3 font-semibold text-slate-700">Assigned Engineer</th>
-                    <th className="px-4 py-3 font-semibold text-slate-700">Balance</th>
-                    <th className="px-4 py-3 font-semibold text-slate-700 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <div className="max-h-[440px] overflow-y-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-slate-50 text-left sticky top-0 z-10">
+                    <tr>
+                      <th className="px-4 py-3 font-semibold text-slate-700 bg-slate-50">Name</th>
+                      <th className="px-4 py-3 font-semibold text-slate-700 bg-slate-50">Email</th>
+                      <th className="px-4 py-3 font-semibold text-slate-700 bg-slate-50">Role</th>
+                      <th className="px-4 py-3 font-semibold text-slate-700 bg-slate-50">Assigned Engineer</th>
+                      <th className="px-4 py-3 font-semibold text-slate-700 bg-slate-50">Balance</th>
+                      <th className="px-4 py-3 font-semibold text-slate-700 text-right bg-slate-50">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
                   {listLoading ? (
                     <tr>
                       <td className="px-4 py-4" colSpan={6}>Loading users...</td>
@@ -921,14 +1032,211 @@ export default function UserManagement() {
                       ))
                     );
                   })()}
-                </tbody>
-              </table>
+                  </tbody>
+                </table>
+              </div>
             </div>
+            ) : (
+            <div className="p-6 min-h-[400px]">
+              {listLoading ? (
+                <div className="text-center py-8 text-gray-500">Loading hierarchy...</div>
+              ) : (() => {
+                const hierarchyData = buildHierarchy();
+                const filteredHierarchy = searchTerm ? hierarchyData.hierarchy.filter(h => {
+                  const search = searchTerm.toLowerCase();
+                  return (
+                    h.engineer.name.toLowerCase().includes(search) ||
+                    h.engineer.email.toLowerCase().includes(search) ||
+                    h.cashiers.some(c => c.name.toLowerCase().includes(search) || c.email.toLowerCase().includes(search)) ||
+                    h.employees.some(e => e.name.toLowerCase().includes(search) || e.email.toLowerCase().includes(search))
+                  );
+                }) : hierarchyData.hierarchy;
+                
+                return (
+                  <div className="space-y-8">
+                    {/* Summary Stats */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                      <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                        <div className="text-2xl font-bold text-blue-900">{hierarchyData.totalEngineers}</div>
+                        <div className="text-sm text-blue-700">Engineers</div>
+                      </div>
+                      <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
+                        <div className="text-2xl font-bold text-purple-900">{hierarchyData.totalCashiers}</div>
+                        <div className="text-sm text-purple-700">Cashiers</div>
+                      </div>
+                      <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+                        <div className="text-2xl font-bold text-green-900">{hierarchyData.totalEmployees}</div>
+                        <div className="text-sm text-green-700">Employees</div>
+                      </div>
+                      <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                        <div className="text-2xl font-bold text-gray-900">{hierarchyData.admins.length}</div>
+                        <div className="text-sm text-gray-700">Admins</div>
+                      </div>
+                    </div>
+
+                    {/* Hierarchy View */}
+                    {filteredHierarchy.length === 0 ? (
+                      <div className="text-center py-8 text-gray-500">No engineers found</div>
+                    ) : (
+                      <div className="space-y-6">
+                        {filteredHierarchy.map((item, idx) => (
+                          <div key={item.engineer.user_id || idx} className="border rounded-lg p-6 bg-gradient-to-br from-blue-50 to-indigo-50">
+                            {/* Engineer Level */}
+                            <div className="mb-4">
+                              <div className="flex items-center justify-between mb-2">
+                                <div 
+                                  className="flex items-center gap-3 cursor-pointer hover:opacity-90 transition-opacity duration-150"
+                                  onClick={() => openUserDrawer(item.engineer)}
+                                >
+                                  <div className="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-lg">
+                                    {item.engineer.name.charAt(0).toUpperCase()}
+                                  </div>
+                                  <div>
+                                    <div className="font-bold text-lg text-gray-900">{item.engineer.name}</div>
+                                    <div className="text-sm text-gray-600">{item.engineer.email}</div>
+                                    <div className="text-sm font-semibold text-blue-700 mt-1">
+                                      Balance: {formatINR(Number(item.engineer.balance ?? 0))}
+                                    </div>
+                                  </div>
+                                  <Badge variant="default" className="bg-blue-600">Engineer</Badge>
+                                </div>
+                                <div className="text-right">
+                                  <div className="text-sm text-gray-600">Team Stats</div>
+                                  <div className="font-semibold text-gray-900">
+                                    {item.cashierCount} Cashier{item.cashierCount !== 1 ? 's' : ''} • {item.employeeCount} Employee{item.employeeCount !== 1 ? 's' : ''}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Cashiers Level */}
+                            {item.cashiers.length > 0 && (
+                              <div className="ml-8 mb-4">
+                                <div className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                                  <div className="w-24 h-0.5 bg-purple-300"></div>
+                                  <span>Cashiers ({item.cashiers.length})</span>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                  {item.cashiers.map((cashier, cIdx) => (
+                                    <div 
+                                      key={cashier.user_id || cIdx} 
+                                      className="bg-white rounded-lg p-4 border border-purple-200 shadow-sm cursor-pointer hover:border-purple-300 transition-colors"
+                                      onClick={() => openUserDrawer(cashier)}
+                                    >
+                                      <div className="flex items-center gap-2 mb-2">
+                                        <div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
+                                          {cashier.name.charAt(0).toUpperCase()}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                          <div className="font-semibold text-sm text-gray-900 truncate">{cashier.name}</div>
+                                          <div className="text-xs text-gray-500 truncate">{cashier.email}</div>
+                                        </div>
+                                        <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-300 text-xs">Cashier</Badge>
+                                      </div>
+                                      <div className="text-xs text-gray-600 space-y-1">
+                                        <div>Balance: {formatINR(Number(cashier.balance ?? 0))}</div>
+                                        <div>Manages: {item.employees.length} employee{item.employees.length !== 1 ? 's' : ''}</div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Employees Level */}
+                            {item.employees.length > 0 && (
+                              <div className="ml-8">
+                                <div className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                                  <div className="w-24 h-0.5 bg-green-300"></div>
+                                  <span>Employees ({item.employees.length})</span>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2">
+                                  {item.employees.map((employee, eIdx) => (
+                                    <div 
+                                      key={employee.user_id || eIdx} 
+                                      className="bg-white rounded-lg p-3 border border-green-200 shadow-sm cursor-pointer hover:border-green-300 transition-colors"
+                                      onClick={() => openUserDrawer(employee)}
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <div className="w-6 h-6 bg-green-600 rounded-full flex items-center justify-center text-white font-bold text-xs">
+                                          {employee.name.charAt(0).toUpperCase()}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                          <div className="font-medium text-xs text-gray-900 truncate">{employee.name}</div>
+                                          <div className="text-xs text-gray-500 truncate">{employee.email}</div>
+                                        </div>
+                                      </div>
+                                      <div className="text-xs text-gray-600 mt-1">
+                                        Balance: {formatINR(Number(employee.balance ?? 0))}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {item.cashiers.length === 0 && item.employees.length === 0 && (
+                              <div className="ml-8 text-sm text-gray-500 italic">No cashiers or employees assigned</div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Unassigned Section */}
+                    {(hierarchyData.unassignedCashiers.length > 0 || hierarchyData.unassignedEmployees.length > 0) && (
+                      <div className="border rounded-lg p-6 bg-gray-50 mt-6">
+                        <div className="font-bold text-lg text-gray-900 mb-4">Unassigned Users</div>
+                        {hierarchyData.unassignedCashiers.length > 0 && (
+                          <div className="mb-4">
+                            <div className="text-sm font-semibold text-gray-700 mb-2">Cashiers ({hierarchyData.unassignedCashiers.length})</div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                              {hierarchyData.unassignedCashiers.map((cashier, idx) => (
+                                <div 
+                                  key={cashier.user_id || idx} 
+                                  className="bg-white rounded p-2 border border-gray-300 text-sm cursor-pointer hover:border-gray-400 transition-colors"
+                                  onClick={() => openUserDrawer(cashier)}
+                                >
+                                  <div>{cashier.name} ({cashier.email})</div>
+                                  <div className="text-xs text-gray-600 mt-1">
+                                    Balance: {formatINR(Number(cashier.balance ?? 0))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {hierarchyData.unassignedEmployees.length > 0 && (
+                          <div>
+                            <div className="text-sm font-semibold text-gray-700 mb-2">Employees ({hierarchyData.unassignedEmployees.length})</div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2">
+                              {hierarchyData.unassignedEmployees.map((employee, idx) => (
+                                <div 
+                                  key={employee.user_id || idx} 
+                                  className="bg-white rounded p-2 border border-gray-300 text-sm cursor-pointer hover:border-gray-400 transition-colors"
+                                  onClick={() => openUserDrawer(employee)}
+                                >
+                                  <div>{employee.name} ({employee.email})</div>
+                                  <div className="text-xs text-gray-600 mt-1">
+                                    Balance: {formatINR(Number(employee.balance ?? 0))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+            )}
           </CardContent>
         </Card>
 
       {/* Create User Card */}
-        <Card className="shadow-2xl border-0 bg-white/80 backdrop-blur-sm overflow-hidden">
+        <Card id="create-user-section" className="shadow-2xl border-0 bg-white/80 backdrop-blur-sm overflow-hidden">
           <CardHeader className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-8">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center">
@@ -961,7 +1269,7 @@ export default function UserManagement() {
                         value={formData.name}
                         onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
                         placeholder="John Doe"
-                        className="pl-10 h-12 border-gray-200 focus:border-blue-500 focus:ring-blue-500/20 transition-all duration-200"
+                        className="pl-10 h-12 border-gray-200 focus:border-blue-500 focus:ring-blue-500/20 transition-colors duration-150"
                         required
                       />
                     </div>
@@ -977,7 +1285,7 @@ export default function UserManagement() {
                         value={formData.email}
                         onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
                         placeholder="john.doe@company.com"
-                        className="pl-10 h-12 border-gray-200 focus:border-blue-500 focus:ring-blue-500/20 transition-all duration-200"
+                        className="pl-10 h-12 border-gray-200 focus:border-blue-500 focus:ring-blue-500/20 transition-colors duration-150"
                         required
                       />
                     </div>
@@ -1003,7 +1311,7 @@ export default function UserManagement() {
                           setFormData(prev => ({ ...prev, role: value }))
                         }
                       >
-                        <SelectTrigger className="pl-10 h-12 border-gray-200 focus:border-blue-500 focus:ring-blue-500/20 transition-all duration-200">
+                        <SelectTrigger className="pl-10 h-12 border-gray-200 focus:border-blue-500 focus:ring-blue-500/20 transition-colors duration-150">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent className="border-0 shadow-xl">
@@ -1056,27 +1364,51 @@ export default function UserManagement() {
                     </div>
                   </div>
 
-                  <div className="space-y-3">
-                    <Label htmlFor="reportingEngineer" className="text-sm font-medium text-gray-700">Assign Engineer (for Employee)</Label>
-                    <Select
-                      value={formData.reportingEngineerId || "none"}
-                      onValueChange={(value) => setFormData(prev => ({ ...prev, reportingEngineerId: value }))}
-                      disabled={formData.role !== "employee"}
-                    >
-                      <SelectTrigger className="h-12 border-gray-200 focus:border-blue-500 focus:ring-blue-500/20 transition-all duration-200">
-                        <SelectValue placeholder="Select engineer" />
-                      </SelectTrigger>
-                      <SelectContent className="border-0 shadow-xl">
-                        <SelectItem value="none">Unassigned</SelectItem>
-                        {engineers.map(e => (
-                          <SelectItem key={e.id} value={e.id}>
-                            {e.name} ({e.email})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-gray-500">If set, all expenses will auto-assign to this engineer.</p>
-                  </div>
+                   {formData.role === "employee" && (
+                     <div className="space-y-3">
+                       <Label htmlFor="reportingEngineer" className="text-sm font-medium text-gray-700">Assign Engineer (for Employee)</Label>
+                       <Select
+                         value={formData.reportingEngineerId || "none"}
+                         onValueChange={(value) => setFormData(prev => ({ ...prev, reportingEngineerId: value }))}
+                       >
+                         <SelectTrigger className="h-12 border-gray-200 focus:border-blue-500 focus:ring-blue-500/20 transition-colors duration-150">
+                           <SelectValue placeholder="Select engineer" />
+                         </SelectTrigger>
+                         <SelectContent className="border-0 shadow-xl">
+                           <SelectItem value="none">Unassigned</SelectItem>
+                           {engineers.map(e => (
+                             <SelectItem key={e.id} value={e.id}>
+                               {e.name} ({e.email})
+                             </SelectItem>
+                           ))}
+                         </SelectContent>
+                       </Select>
+                       <p className="text-xs text-gray-500">If set, all expenses will auto-assign to this engineer.</p>
+                     </div>
+                   )}
+
+                   {formData.role === "cashier" && (
+                     <div className="space-y-3">
+                       <Label htmlFor="cashierEngineer" className="text-sm font-medium text-gray-700">Assign Engineer (Zone/Department)</Label>
+                       <Select
+                         value={formData.cashierAssignedEngineerId || "none"}
+                         onValueChange={(value) => setFormData(prev => ({ ...prev, cashierAssignedEngineerId: value }))}
+                       >
+                         <SelectTrigger className="h-12 border-gray-200 focus:border-blue-500 focus:ring-blue-500/20 transition-colors duration-150">
+                           <SelectValue placeholder="Select engineer" />
+                         </SelectTrigger>
+                         <SelectContent className="border-0 shadow-xl">
+                           <SelectItem value="none">Unassigned (Can manage all)</SelectItem>
+                           {engineers.map(e => (
+                             <SelectItem key={e.id} value={e.id}>
+                               {e.name} ({e.email})
+                             </SelectItem>
+                           ))}
+                         </SelectContent>
+                       </Select>
+                       <p className="text-xs text-gray-500">If set, this cashier can only manage employees under the selected engineer's zone/department.</p>
+                     </div>
+                   )}
 
                   <div className="space-y-3">
                     <Label htmlFor="password" className="text-sm font-medium text-gray-700">Permanent Password *</Label>
@@ -1088,7 +1420,7 @@ export default function UserManagement() {
                           value={formData.password}
                           onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
                           placeholder="Enter permanent password (min 8 characters)"
-                          className={`h-12 pr-20 border-gray-200 focus:border-blue-500 focus:ring-blue-500/20 transition-all duration-200 ${
+                          className={`h-12 pr-20 border-gray-200 focus:border-blue-500 focus:ring-blue-500/20 transition-colors duration-150 ${
                             formData.password && formData.password.length < 8 ? "border-red-300 focus:border-red-500" : ""
                           }`}
                           required
@@ -1116,7 +1448,7 @@ export default function UserManagement() {
                       <Button
                         type="button"
                         onClick={generatePassword}
-                        className="h-12 px-6 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-medium shadow-lg hover:shadow-xl transition-all duration-200"
+                        className="h-12 px-6 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-medium shadow-lg transition-colors duration-150"
                       >
                         <Sparkles className="h-4 w-4 mr-2" />
                         Generate
@@ -1184,7 +1516,7 @@ export default function UserManagement() {
               <div className="pt-4">
                 <Button 
                   type="submit" 
-                  className="w-full h-14 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold text-lg shadow-xl hover:shadow-2xl transition-all duration-300 transform hover:scale-[1.02]"
+                  className="w-full h-14 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold text-lg shadow-xl hover:shadow-xl transition-colors duration-200"
                   disabled={loading}
                 >
                   {loading ? (
@@ -1261,7 +1593,23 @@ export default function UserManagement() {
       {/* Details Drawer */}
       <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
         <SheetContent side="right" className="w-full sm:max-w-xl md:max-w-2xl lg:max-w-3xl overflow-y-auto">
-          <SheetHeader>
+          <SheetHeader className="relative pr-20">
+            <div className="absolute right-12 top-0">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if (selectedUser) {
+                    openEditDialog(selectedUser);
+                    setDrawerOpen(false);
+                  }
+                }}
+                className="flex items-center gap-2"
+              >
+                <Edit className="h-4 w-4" />
+                Edit
+              </Button>
+            </div>
             <SheetTitle>User Details</SheetTitle>
             <SheetDescription>Profile, balance, and complete expense history</SheetDescription>
           </SheetHeader>
@@ -1671,6 +2019,7 @@ export default function UserManagement() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
     </div>
   );
 }
