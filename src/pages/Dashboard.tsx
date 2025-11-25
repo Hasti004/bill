@@ -3,7 +3,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Plus, Coins, Clock, CheckCircle, XCircle, TrendingUp, Users, Receipt, Wallet, Bell, CheckCircle as CheckCircleIcon, XCircle as XCircleIcon, AlertCircle, ArrowRight } from "lucide-react";
+import { Plus, Coins, Clock, CheckCircle, XCircle, TrendingUp, Users, Receipt, Wallet, Bell, CheckCircle as CheckCircleIcon, XCircle as XCircleIcon, AlertCircle, ArrowRight, UserPlus } from "lucide-react";
 import { formatINR } from "@/lib/format";
 import { useNavigate } from "react-router-dom";
 import { format } from "date-fns";
@@ -373,6 +373,24 @@ export default function Dashboard() {
             >
               <Plus className="mr-2 h-4 w-4" />
               Add Expense
+            </Button>
+          )}
+          {userRole === "admin" && (
+            <Button 
+              onClick={() => {
+                navigate("/admin/users");
+                setTimeout(() => {
+                  const element = document.getElementById('create-user-section');
+                  if (element) {
+                    element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }
+                }, 100);
+              }}
+              className="w-full sm:w-auto"
+              variant="outline"
+            >
+              <UserPlus className="mr-2 h-4 w-4" />
+              Create User
             </Button>
           )}
           {userRole === "engineer" && (

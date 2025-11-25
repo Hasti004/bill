@@ -902,38 +902,39 @@ export default function UserManagement() {
 
       {/* Users List Card */}
         <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm">
-          <CardHeader className="p-6">
-            <div className="flex items-center justify-between">
+          <CardHeader className="p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0">
               <div>
-                <CardTitle className="text-xl font-bold">All Users</CardTitle>
-                <CardDescription>Click a user to view full details and expense history</CardDescription>
+                <CardTitle className="text-lg sm:text-xl font-bold">All Users</CardTitle>
+                <CardDescription className="text-xs sm:text-sm">Click a user to view full details and expense history</CardDescription>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <Button
                   onClick={scrollToCreateUser}
-                  className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white transition-colors duration-150"
+                  className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white transition-colors duration-150 text-xs sm:text-sm"
                   size="sm"
                 >
-                  <UserPlus className="h-4 w-4 mr-2" />
-                  Create User
+                  <UserPlus className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+                  <span className="hidden sm:inline">Create User</span>
+                  <span className="sm:hidden">Create</span>
                 </Button>
                 <Button
                   variant={viewMode === "table" ? "default" : "outline"}
                   size="sm"
                   onClick={() => setViewMode("table")}
-                  className="flex items-center gap-2"
+                  className="flex items-center gap-1 sm:gap-2 text-xs sm:text-sm"
                 >
-                  <Table2 className="h-4 w-4" />
-                  Table
+                  <Table2 className="h-3 w-3 sm:h-4 sm:w-4" />
+                  <span className="hidden sm:inline">Table</span>
                 </Button>
                 <Button
                   variant={viewMode === "hierarchical" ? "default" : "outline"}
                   size="sm"
                   onClick={() => setViewMode("hierarchical")}
-                  className="flex items-center gap-2"
+                  className="flex items-center gap-1 sm:gap-2 text-xs sm:text-sm"
                 >
-                  <Network className="h-4 w-4" />
-                  Hierarchy
+                  <Network className="h-3 w-3 sm:h-4 sm:w-4" />
+                  <span className="hidden sm:inline">Hierarchy</span>
                 </Button>
               </div>
             </div>
@@ -954,17 +955,17 @@ export default function UserManagement() {
           </CardContent>
           <CardContent className="p-0 pt-0">
             {viewMode === "table" ? (
-            <div className="overflow-x-auto">
-              <div className="max-h-[440px] overflow-y-auto">
-                <table className="min-w-full text-sm">
+            <div className="overflow-x-auto -mx-4 sm:mx-0">
+              <div className="max-h-[440px] overflow-y-auto min-h-[400px]">
+                <table className="min-w-full text-xs sm:text-sm">
                   <thead className="bg-slate-50 text-left sticky top-0 z-10">
                     <tr>
-                      <th className="px-4 py-3 font-semibold text-slate-700 bg-slate-50">Name</th>
-                      <th className="px-4 py-3 font-semibold text-slate-700 bg-slate-50">Email</th>
-                      <th className="px-4 py-3 font-semibold text-slate-700 bg-slate-50">Role</th>
-                      <th className="px-4 py-3 font-semibold text-slate-700 bg-slate-50">Assigned Engineer</th>
-                      <th className="px-4 py-3 font-semibold text-slate-700 bg-slate-50">Balance</th>
-                      <th className="px-4 py-3 font-semibold text-slate-700 text-right bg-slate-50">Actions</th>
+                      <th className="px-2 sm:px-4 py-2 sm:py-3 font-semibold text-slate-700 bg-slate-50 min-w-[140px]">Name / Email</th>
+                      <th className="px-2 sm:px-4 py-2 sm:py-3 font-semibold text-slate-700 bg-slate-50 min-w-[120px] hidden sm:table-cell">Email</th>
+                      <th className="px-2 sm:px-4 py-2 sm:py-3 font-semibold text-slate-700 bg-slate-50 min-w-[100px]">Role</th>
+                      <th className="px-2 sm:px-4 py-2 sm:py-3 font-semibold text-slate-700 bg-slate-50 min-w-[120px] hidden md:table-cell">Assigned Engineer</th>
+                      <th className="px-2 sm:px-4 py-2 sm:py-3 font-semibold text-slate-700 bg-slate-50 min-w-[100px] hidden sm:table-cell">Balance</th>
+                      <th className="px-2 sm:px-4 py-2 sm:py-3 font-semibold text-slate-700 text-right bg-slate-50 min-w-[120px]">Balance / Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -991,15 +992,18 @@ export default function UserManagement() {
                       </tr>
                     ) : (
                       filteredUsers.map(u => (
-                      <tr key={u.user_id} className="border-t hover:bg-slate-50">
-                        <td className="px-4 py-3">{u.name || "-"}</td>
-                        <td className="px-4 py-3">{u.email || "-"}</td>
-                        <td className="px-4 py-3">
+                      <tr key={u.user_id} className="border-t hover:bg-slate-50 cursor-pointer" onClick={() => openUserDrawer(u)}>
+                        <td className="px-2 sm:px-4 py-2 sm:py-3">
+                          <div className="font-medium">{u.name || "-"}</div>
+                          <div className="text-xs text-muted-foreground sm:hidden mt-1">{u.email || "-"}</div>
+                        </td>
+                        <td className="px-2 sm:px-4 py-2 sm:py-3 hidden sm:table-cell">{u.email || "-"}</td>
+                        <td className="px-2 sm:px-4 py-2 sm:py-3">
                           <span className="inline-flex items-center px-2 py-1 rounded bg-slate-100 text-slate-700 text-xs font-medium">
                             {u.role}
                           </span>
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-2 sm:px-4 py-2 sm:py-3 hidden md:table-cell">
                           {u.role === "employee" ? (
                             u.assigned_engineer_name ? (
                               <span className="text-slate-700 font-medium">{u.assigned_engineer_name}</span>
@@ -1016,16 +1020,22 @@ export default function UserManagement() {
                             <span className="text-slate-400">-</span>
                           )}
                         </td>
-                        <td className="px-4 py-3">{formatINR(Number(u.balance ?? 0))}</td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center justify-end gap-2">
-                            <Button variant="outline" size="sm" onClick={() => openUserDrawer(u)}>View</Button>
-                            <Button variant="outline" size="sm" onClick={() => openEditDialog(u)}>
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                            <Button variant="destructive" size="sm" onClick={() => openDeleteDialog(u)}>
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                        <td className="px-2 sm:px-4 py-2 sm:py-3 font-medium hidden sm:table-cell">{formatINR(Number(u.balance ?? 0))}</td>
+                        <td className="px-2 sm:px-4 py-2 sm:py-3" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex flex-col sm:flex-row items-end gap-2 sm:gap-0">
+                            <div className="sm:hidden font-medium text-right">{formatINR(Number(u.balance ?? 0))}</div>
+                            <div className="flex items-center justify-end gap-1 sm:gap-2">
+                              <Button variant="outline" size="sm" onClick={() => openUserDrawer(u)} className="text-xs sm:text-sm px-2 sm:px-3">
+                                <span className="hidden sm:inline">View</span>
+                                <Eye className="h-3 w-3 sm:h-4 sm:w-4 sm:hidden" />
+                              </Button>
+                              <Button variant="outline" size="sm" onClick={() => openEditDialog(u)} className="px-2 sm:px-3">
+                                <Edit className="h-3 w-3 sm:h-4 sm:w-4" />
+                              </Button>
+                              <Button variant="destructive" size="sm" onClick={() => openDeleteDialog(u)} className="px-2 sm:px-3">
+                                <Trash2 className="h-3 w-3 sm:h-4 sm:w-4" />
+                              </Button>
+                            </div>
                           </div>
                         </td>
                       </tr>
@@ -1055,22 +1065,22 @@ export default function UserManagement() {
                 return (
                   <div className="space-y-8">
                     {/* Summary Stats */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                      <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
-                        <div className="text-2xl font-bold text-blue-900">{hierarchyData.totalEngineers}</div>
-                        <div className="text-sm text-blue-700">Engineers</div>
+                    <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 mb-4 sm:mb-6">
+                      <div className="bg-blue-50 p-3 sm:p-4 rounded-lg border border-blue-200">
+                        <div className="text-xl sm:text-2xl font-bold text-blue-900">{hierarchyData.totalEngineers}</div>
+                        <div className="text-xs sm:text-sm text-blue-700">Engineers</div>
                       </div>
-                      <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
-                        <div className="text-2xl font-bold text-purple-900">{hierarchyData.totalCashiers}</div>
-                        <div className="text-sm text-purple-700">Cashiers</div>
+                      <div className="bg-purple-50 p-3 sm:p-4 rounded-lg border border-purple-200">
+                        <div className="text-xl sm:text-2xl font-bold text-purple-900">{hierarchyData.totalCashiers}</div>
+                        <div className="text-xs sm:text-sm text-purple-700">Cashiers</div>
                       </div>
-                      <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-                        <div className="text-2xl font-bold text-green-900">{hierarchyData.totalEmployees}</div>
-                        <div className="text-sm text-green-700">Employees</div>
+                      <div className="bg-green-50 p-3 sm:p-4 rounded-lg border border-green-200">
+                        <div className="text-xl sm:text-2xl font-bold text-green-900">{hierarchyData.totalEmployees}</div>
+                        <div className="text-xs sm:text-sm text-green-700">Employees</div>
                       </div>
-                      <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                        <div className="text-2xl font-bold text-gray-900">{hierarchyData.admins.length}</div>
-                        <div className="text-sm text-gray-700">Admins</div>
+                      <div className="bg-gray-50 p-3 sm:p-4 rounded-lg border border-gray-200">
+                        <div className="text-xl sm:text-2xl font-bold text-gray-900">{hierarchyData.admins.length}</div>
+                        <div className="text-xs sm:text-sm text-gray-700">Admins</div>
                       </div>
                     </div>
 
@@ -1078,31 +1088,31 @@ export default function UserManagement() {
                     {filteredHierarchy.length === 0 ? (
                       <div className="text-center py-8 text-gray-500">No engineers found</div>
                     ) : (
-                      <div className="space-y-6">
+                      <div className="space-y-4 sm:space-y-6">
                         {filteredHierarchy.map((item, idx) => (
-                          <div key={item.engineer.user_id || idx} className="border rounded-lg p-6 bg-gradient-to-br from-blue-50 to-indigo-50">
+                          <div key={item.engineer.user_id || idx} className="border rounded-lg p-4 sm:p-6 bg-gradient-to-br from-blue-50 to-indigo-50">
                             {/* Engineer Level */}
-                            <div className="mb-4">
-                              <div className="flex items-center justify-between mb-2">
+                            <div className="mb-3 sm:mb-4">
+                              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0 mb-2">
                                 <div 
-                                  className="flex items-center gap-3 cursor-pointer hover:opacity-90 transition-opacity duration-150"
+                                  className="flex items-center gap-2 sm:gap-3 cursor-pointer hover:opacity-90 transition-opacity duration-150"
                                   onClick={() => openUserDrawer(item.engineer)}
                                 >
-                                  <div className="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-lg">
+                                  <div className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-base sm:text-lg flex-shrink-0">
                                     {item.engineer.name.charAt(0).toUpperCase()}
                                   </div>
-                                  <div>
-                                    <div className="font-bold text-lg text-gray-900">{item.engineer.name}</div>
-                                    <div className="text-sm text-gray-600">{item.engineer.email}</div>
-                                    <div className="text-sm font-semibold text-blue-700 mt-1">
+                                  <div className="min-w-0 flex-1">
+                                    <div className="font-bold text-base sm:text-lg text-gray-900 truncate">{item.engineer.name}</div>
+                                    <div className="text-xs sm:text-sm text-gray-600 truncate">{item.engineer.email}</div>
+                                    <div className="text-xs sm:text-sm font-semibold text-blue-700 mt-1">
                                       Balance: {formatINR(Number(item.engineer.balance ?? 0))}
                                     </div>
                                   </div>
-                                  <Badge variant="default" className="bg-blue-600">Engineer</Badge>
+                                  <Badge variant="default" className="bg-blue-600 text-xs sm:text-sm flex-shrink-0">Engineer</Badge>
                                 </div>
-                                <div className="text-right">
-                                  <div className="text-sm text-gray-600">Team Stats</div>
-                                  <div className="font-semibold text-gray-900">
+                                <div className="text-left sm:text-right">
+                                  <div className="text-xs sm:text-sm text-gray-600">Team Stats</div>
+                                  <div className="font-semibold text-sm sm:text-base text-gray-900">
                                     {item.cashierCount} Cashier{item.cashierCount !== 1 ? 's' : ''} • {item.employeeCount} Employee{item.employeeCount !== 1 ? 's' : ''}
                                   </div>
                                 </div>
@@ -1111,12 +1121,12 @@ export default function UserManagement() {
 
                             {/* Cashiers Level */}
                             {item.cashiers.length > 0 && (
-                              <div className="ml-8 mb-4">
-                                <div className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                                  <div className="w-24 h-0.5 bg-purple-300"></div>
+                              <div className="ml-0 sm:ml-4 md:ml-8 mb-3 sm:mb-4">
+                                <div className="text-xs sm:text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                                  <div className="w-12 sm:w-24 h-0.5 bg-purple-300"></div>
                                   <span>Cashiers ({item.cashiers.length})</span>
                                 </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3">
                                   {item.cashiers.map((cashier, cIdx) => (
                                     <div 
                                       key={cashier.user_id || cIdx} 
@@ -1145,12 +1155,12 @@ export default function UserManagement() {
 
                             {/* Employees Level */}
                             {item.employees.length > 0 && (
-                              <div className="ml-8">
-                                <div className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                                  <div className="w-24 h-0.5 bg-green-300"></div>
+                              <div className="ml-0 sm:ml-4 md:ml-8">
+                                <div className="text-xs sm:text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                                  <div className="w-12 sm:w-24 h-0.5 bg-green-300"></div>
                                   <span>Employees ({item.employees.length})</span>
                                 </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
                                   {item.employees.map((employee, eIdx) => (
                                     <div 
                                       key={employee.user_id || eIdx} 

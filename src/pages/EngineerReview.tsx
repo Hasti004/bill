@@ -87,6 +87,7 @@ export default function EngineerReview() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [sortOrder, setSortOrder] = useState<string>("desc");
   const [allExpenses, setAllExpenses] = useState<Expense[]>([]);
+  const [auditLogs, setAuditLogs] = useState<Array<{action: string; user_name: string; comment?: string; created_at: string}>>([]);
 
   useEffect(() => {
     if (userRole === "engineer") {
@@ -160,11 +161,28 @@ export default function EngineerReview() {
         dateFilter = subYears(new Date(), 1);
       }
 
-      // Build query - include all statuses (submitted, verified, approved, rejected)
+      // First, get all employees currently assigned to this engineer
+      const { data: employeeProfiles, error: employeesError } = await supabase
+        .from("profiles")
+        .select("user_id")
+        .eq("reporting_engineer_id", user?.id);
+
+      if (employeesError) throw employeesError;
+
+      const employeeIds = (employeeProfiles || []).map(p => p.user_id);
+      
+      if (employeeIds.length === 0) {
+        setAllExpenses([]);
+        setExpenses([]);
+        return;
+      }
+
+      // Get ALL expenses from employees currently assigned to this engineer
+      // This includes historical expenses even if they were reviewed/approved by a different engineer
       let query = supabase
         .from("expenses")
         .select("*")
-        .eq("assigned_engineer_id", user?.id)
+        .in("user_id", employeeIds)
         .in("status", ["submitted", "verified", "approved", "rejected"]);
 
       // Apply date filter if time period is selected
@@ -177,60 +195,14 @@ export default function EngineerReview() {
 
       if (expensesError) throw expensesError;
 
-      // Fetch expenses rejected by this engineer from audit_logs
-      const { data: rejectedLogs, error: rejectedLogsError } = await supabase
-        .from("audit_logs")
-        .select("expense_id")
-        .eq("user_id", user?.id)
-        .eq("action", "expense_rejected");
-
-      if (rejectedLogsError) {
-        console.error("Error fetching rejected expenses logs:", rejectedLogsError);
-      }
-
-      let rejectedExpenseIds: string[] = [];
-      if (rejectedLogs && rejectedLogs.length > 0) {
-        rejectedExpenseIds = rejectedLogs.map(log => log.expense_id);
-      }
-
-      // Fetch rejected expenses that were rejected by this engineer
-      let rejectedExpenses: any[] = [];
-      if (rejectedExpenseIds.length > 0) {
-        let rejectedQuery = supabase
-          .from("expenses")
-          .select("*")
-          .eq("assigned_engineer_id", user?.id)
-          .eq("status", "rejected")
-          .in("id", rejectedExpenseIds);
-
-        if (dateFilter) {
-          rejectedQuery = rejectedQuery.gte("created_at", dateFilter.toISOString());
-        }
-
-        const { data: rejectedData, error: rejectedError } = await rejectedQuery
-          .order("created_at", { ascending: false });
-
-        if (!rejectedError && rejectedData) {
-          rejectedExpenses = rejectedData;
-        }
-      }
-
-      // Combine all expenses (submitted, verified, approved, and rejected by this engineer)
-      const allExpensesData = [...(expenses || []), ...rejectedExpenses];
-      
-      // Remove duplicates
-      const uniqueExpenses = Array.from(
-        new Map(allExpensesData.map(exp => [exp.id, exp])).values()
-      );
-
-      if (uniqueExpenses.length === 0) {
+      if (!expenses || expenses.length === 0) {
         setAllExpenses([]);
         setExpenses([]);
         return;
       }
 
-      // 2) Fetch related profiles separately and merge client-side
-      const userIds = [...new Set(uniqueExpenses.map(e => e.user_id))];
+      // Fetch related profiles separately and merge client-side
+      const userIds = [...new Set(expenses.map(e => e.user_id))];
       const { data: profiles, error: profilesError } = await supabase
         .from("profiles")
         .select("user_id, name, email")
@@ -238,7 +210,7 @@ export default function EngineerReview() {
 
       if (profilesError) throw profilesError;
 
-      const merged = uniqueExpenses.map(expense => {
+      const merged = expenses.map(expense => {
         const profile = profiles?.find(p => p.user_id === expense.user_id);
         return {
           ...expense,
@@ -311,6 +283,47 @@ export default function EngineerReview() {
 
       setLineItems(lineItemsData || []);
       setAttachments(attachmentsData || []);
+
+      // Fetch audit logs to show approval/rejection history
+      const { data: logsData, error: logsError } = await supabase
+        .from("audit_logs")
+        .select("user_id, action, comment, created_at")
+        .eq("expense_id", expenseId)
+        .in("action", ["expense_approved", "expense_rejected", "expense_verified", "expense_submitted", "expense_created"])
+        .order("created_at", { ascending: false });
+
+      if (logsError) {
+        console.error("Error fetching audit logs:", logsError);
+      } else if (logsData && logsData.length > 0) {
+        // Fetch user profiles for audit logs
+        const userIds = [...new Set(logsData.map(log => log.user_id))];
+        const { data: profiles, error: profilesError } = await supabase
+          .from("profiles")
+          .select("user_id, name")
+          .in("user_id", userIds);
+
+        if (!profilesError && profiles) {
+          const logsWithNames = logsData.map(log => {
+            const profile = profiles.find(p => p.user_id === log.user_id);
+            return {
+              action: log.action,
+              user_name: profile?.name || "Unknown User",
+              comment: log.comment,
+              created_at: log.created_at
+            };
+          });
+          setAuditLogs(logsWithNames);
+        } else {
+          setAuditLogs(logsData.map(log => ({
+            action: log.action,
+            user_name: "Unknown User",
+            comment: log.comment,
+            created_at: log.created_at
+          })));
+        }
+      } else {
+        setAuditLogs([]);
+      }
     } catch (error) {
       console.error("Error fetching expense details:", error);
     }
@@ -337,6 +350,7 @@ export default function EngineerReview() {
       setEngineerComment("");
       setLineItems([]);
       setAttachments([]);
+      setAuditLogs([]);
       fetchAssignedExpenses();
     } catch (error: any) {
       console.error("Error verifying expense:", error);
@@ -368,6 +382,7 @@ export default function EngineerReview() {
       setEngineerComment("");
       setLineItems([]);
       setAttachments([]);
+      setAuditLogs([]);
       fetchAssignedExpenses();
     } catch (error: any) {
       console.error("Error approving expense:", error);
@@ -398,6 +413,7 @@ export default function EngineerReview() {
       setEngineerComment("");
       setLineItems([]);
       setAttachments([]);
+      setAuditLogs([]);
       fetchAssignedExpenses();
     } catch (error: any) {
       console.error("Error rejecting expense:", error);
@@ -451,11 +467,11 @@ export default function EngineerReview() {
   }
 
   return (
-    <div className="space-y-8">
-      <div className="flex justify-between items-center">
+    <div className="space-y-4 sm:space-y-6 lg:space-y-8">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 sm:gap-0">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Expense Review</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Expense Review</h1>
+          <p className="text-sm sm:text-base text-muted-foreground mt-1">
             Review and verify assigned expense submissions
           </p>
         </div>
@@ -506,11 +522,11 @@ export default function EngineerReview() {
 
       {/* Expenses Table */}
       <Card>
-        <CardHeader>
-          <CardTitle>Assigned Expenses</CardTitle>
-          <CardDescription>Review and verify expense submissions assigned to you</CardDescription>
+        <CardHeader className="p-4 sm:p-6">
+          <CardTitle className="text-lg sm:text-xl">Assigned Expenses</CardTitle>
+          <CardDescription className="text-xs sm:text-sm">Review and verify expense submissions assigned to you</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-4 sm:p-6">
           {/* Search and Filter Bar */}
           <div className="flex flex-col sm:flex-row gap-3 mb-6">
             {/* Search Bar */}
@@ -581,72 +597,74 @@ export default function EngineerReview() {
               </p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <Table className="table-fixed w-full">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[12%]">Employee</TableHead>
-                    <TableHead className="w-[14%]">Title</TableHead>
-                    <TableHead className="w-[12%]">Destination</TableHead>
-                    <TableHead className="w-[10%]">Amount</TableHead>
-                    <TableHead className="w-[10%]">Status</TableHead>
-                    <TableHead className="w-[10%] whitespace-nowrap text-right pr-4">Created</TableHead>
-                    <TableHead className="text-right w-[12%]">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
+            <div className="overflow-x-auto -mx-4 sm:mx-0">
+              <div className="inline-block min-w-full align-middle">
+                <Table className="min-w-full">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="min-w-[140px] sm:min-w-[140px]">Employee / Title</TableHead>
+                      <TableHead className="min-w-[100px] hidden sm:table-cell">Title</TableHead>
+                      <TableHead className="min-w-[100px] hidden sm:table-cell">Destination</TableHead>
+                      <TableHead className="min-w-[90px] whitespace-nowrap">Amount</TableHead>
+                      <TableHead className="min-w-[100px] hidden sm:table-cell">Status</TableHead>
+                      <TableHead className="min-w-[100px] whitespace-nowrap text-right pr-2 sm:pr-4 hidden sm:table-cell">Created</TableHead>
+                      <TableHead className="min-w-[120px] text-right">Status / Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
               <TableBody>
                 {expenses.map((expense) => (
                   <TableRow key={expense.id}>
-                    <TableCell className="text-sm">
+                    <TableCell className="text-xs sm:text-sm">
                       <div>
                         <div className="font-medium truncate">{expense.user_name}</div>
-                        <div className="text-xs text-muted-foreground truncate">{expense.user_email}</div>
+                        <div className="text-xs text-muted-foreground truncate sm:hidden">{expense.user_email}</div>
+                        <div className="font-medium text-xs sm:text-sm mt-1 line-clamp-1 break-words">{expense.title}</div>
+                        <div className="text-xs text-muted-foreground sm:hidden mt-1">{expense.destination}</div>
+                        <div className="text-xs text-muted-foreground sm:hidden mt-1">
+                          {format(new Date(expense.created_at), "MMM d, yyyy")}
+                        </div>
                       </div>
                     </TableCell>
-                    <TableCell className="font-medium text-sm">
+                    <TableCell className="font-medium text-xs sm:text-sm hidden sm:table-cell">
                       <div className="line-clamp-2 break-words">{expense.title}</div>
                     </TableCell>
-                    <TableCell className="text-sm truncate">{expense.destination}</TableCell>
-                    <TableCell className="whitespace-nowrap text-sm">{formatINR(expense.total_amount)}</TableCell>
-                    <TableCell>
+                    <TableCell className="text-xs sm:text-sm truncate hidden sm:table-cell">{expense.destination}</TableCell>
+                    <TableCell className="whitespace-nowrap text-xs sm:text-sm font-medium">{formatINR(expense.total_amount)}</TableCell>
+                    <TableCell className="hidden sm:table-cell">
                       <StatusBadge status={expense.status as any} />
                     </TableCell>
-                    <TableCell className="whitespace-nowrap text-sm text-right pr-4">
+                    <TableCell className="whitespace-nowrap text-xs sm:text-sm text-right pr-2 sm:pr-4 hidden sm:table-cell">
                       {format(new Date(expense.created_at), "MMM d, yyyy")}
                     </TableCell>
                     <TableCell className="text-right">
-                      <div className="flex justify-end">
-                        {expense.status === "approved" || expense.status === "rejected" ? (
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            className="h-8 px-2 text-xs font-normal text-muted-foreground whitespace-nowrap"
-                            disabled
-                            title={expense.status === "approved" ? "Expense is already approved" : "Expense is rejected"}
-                          >
-                            View
-                          </Button>
-                        ) : (
-                          <Dialog>
-                            <DialogTrigger asChild>
-                              <Button
-                                variant="default"
-                                size="sm"
-                                className="h-8 px-2 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white whitespace-nowrap"
-                                onClick={async () => {
-                                  setSelectedExpense(expense);
-                                  fetchExpenseDetails(expense.id);
-                                  // Refresh the approval limit to get the latest value from admin settings
-                                  await fetchEngineerApprovalLimit();
-                                }}
-                              >
-                                View/Approve
-                              </Button>
-                            </DialogTrigger>
-                        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+                      <div className="flex flex-col sm:flex-row items-end gap-2 sm:gap-0">
+                        <div className="sm:hidden mb-2">
+                          <StatusBadge status={expense.status as any} />
+                        </div>
+                        <div className="flex justify-end">
+                        <Dialog>
+                          <DialogTrigger asChild>
+                            <Button
+                              variant={expense.status === "approved" || expense.status === "rejected" ? "secondary" : "default"}
+                              size="sm"
+                              className={expense.status === "approved" || expense.status === "rejected" 
+                                ? "h-8 px-2 text-xs font-normal whitespace-nowrap"
+                                : "h-8 px-2 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white whitespace-nowrap"
+                              }
+                              onClick={async () => {
+                                setSelectedExpense(expense);
+                                fetchExpenseDetails(expense.id);
+                                // Refresh the approval limit to get the latest value from admin settings
+                                await fetchEngineerApprovalLimit();
+                              }}
+                            >
+                              {expense.status === "approved" || expense.status === "rejected" ? "View" : "View/Approve"}
+                            </Button>
+                          </DialogTrigger>
+                        <DialogContent className="max-w-[95vw] sm:max-w-4xl max-h-[95vh] sm:max-h-[90vh] overflow-y-auto p-4 sm:p-6">
                           <DialogHeader>
-                            <DialogTitle>Expense Review</DialogTitle>
-                            <DialogDescription>
+                            <DialogTitle className="text-lg sm:text-xl">Expense Review</DialogTitle>
+                            <DialogDescription className="text-xs sm:text-sm">
                               Review expense details and verify the submission
                             </DialogDescription>
                           </DialogHeader>
@@ -654,7 +672,7 @@ export default function EngineerReview() {
                           {selectedExpense && (
                             <div className="space-y-6">
                               {/* Basic Info */}
-                              <div className="grid grid-cols-2 gap-4">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <Card>
                                   <CardHeader className="pb-3">
                                     <CardTitle className="text-base">Employee Information</CardTitle>
@@ -840,7 +858,7 @@ export default function EngineerReview() {
                             </div>
                           )}
 
-                          <DialogFooter className="gap-2">
+                          <DialogFooter className="flex-col sm:flex-row gap-2 sm:gap-0">
                             <Button 
                               variant="outline" 
                               onClick={() => {
@@ -848,7 +866,9 @@ export default function EngineerReview() {
                                 setEngineerComment("");
                                 setLineItems([]);
                                 setAttachments([]);
+                                setAuditLogs([]);
                               }}
+                              className="w-full sm:w-auto"
                             >
                               Cancel
                             </Button>
@@ -871,12 +891,14 @@ export default function EngineerReview() {
                                       onClick={() => rejectExpense()}
                                       disabled={reviewLoading || !canTakeAction}
                                       variant="destructive"
+                                      className="w-full sm:w-auto"
                                     >
                                       Reject
                                     </Button>
                                     <Button 
                                       onClick={() => approveExpense()}
                                       disabled={reviewLoading || !canTakeAction}
+                                      className="w-full sm:w-auto"
                                     >
                                       Approve
                                     </Button>
@@ -889,13 +911,14 @@ export default function EngineerReview() {
                                       onClick={() => rejectExpense()}
                                       disabled={reviewLoading || !canTakeAction}
                                       variant="destructive"
+                                      className="w-full sm:w-auto"
                                     >
                                       Reject
                                     </Button>
                                     <Button 
                                       onClick={() => verifyExpense()}
                                       disabled={reviewLoading || !canTakeAction}
-                                      className="bg-blue-500 hover:bg-blue-600"
+                                      className="bg-blue-500 hover:bg-blue-600 w-full sm:w-auto"
                                     >
                                       Verify
                                     </Button>
@@ -906,15 +929,7 @@ export default function EngineerReview() {
                           </DialogFooter>
                         </DialogContent>
                       </Dialog>
-                      )}
-                      {/* Image Preview Dialog */}
-                      <Dialog open={imagePreviewOpen} onOpenChange={setImagePreviewOpen}>
-                        <DialogContent className="max-w-3xl">
-                          {imagePreviewUrl && (
-                            <img src={imagePreviewUrl} alt="Attachment preview" className="w-full h-auto rounded" />
-                          )}
-                        </DialogContent>
-                      </Dialog>
+                        </div>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -922,9 +937,19 @@ export default function EngineerReview() {
               </TableBody>
             </Table>
             </div>
+            </div>
           )}
         </CardContent>
       </Card>
+      
+      {/* Image Preview Dialog */}
+      <Dialog open={imagePreviewOpen} onOpenChange={setImagePreviewOpen}>
+        <DialogContent className="max-w-3xl">
+          {imagePreviewUrl && (
+            <img src={imagePreviewUrl} alt="Attachment preview" className="w-full h-auto rounded" />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

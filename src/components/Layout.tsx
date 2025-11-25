@@ -97,7 +97,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
                     Expense Management
                   </h1>
                   <p className="text-xs text-gray-500 hidden sm:block">
-                    Expense Management System
+                    Bikes Auto - Hero MotoCorp
                   </p>
                 </div>
               </div>

@@ -7,7 +7,6 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { 
   Table, 
   TableBody, 
@@ -778,13 +777,7 @@ export default function AdminPanel() {
       </div>
 
       {/* Main Content */}
-      <Tabs defaultValue="expenses" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="expenses">All Expenses</TabsTrigger>
-          <TabsTrigger value="users">User Management</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="expenses" className="space-y-4">
+      <div className="space-y-4">
           {/* Search and Filter Controls */}
           <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm">
             <CardHeader className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-6">
@@ -849,46 +842,52 @@ export default function AdminPanel() {
           </Card>
 
           <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm">
-            <CardHeader>
-              <CardTitle className="text-xl font-bold">All Expenses</CardTitle>
-              <CardDescription>Review and manage expense submissions from all users</CardDescription>
+            <CardHeader className="p-4 sm:p-6">
+              <CardTitle className="text-lg sm:text-xl font-bold">All Expenses</CardTitle>
+              <CardDescription className="text-xs sm:text-sm">Review and manage expense submissions from all users</CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="p-4 sm:p-6">
               {loading ? (
                 <div className="min-h-[400px] flex items-center justify-center">
                   <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
                   <span className="ml-2 text-gray-600">Loading expenses...</span>
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <Table className="table-fixed w-full">
-                    <TableHeader>
-                      <TableRow className="border-gray-200">
-                        <TableHead className="font-semibold w-[12%]">Employee</TableHead>
-                        <TableHead className="font-semibold w-[14%]">Title</TableHead>
-                        <TableHead className="font-semibold w-[12%]">Destination</TableHead>
-                        <TableHead className="font-semibold w-[10%]">Amount</TableHead>
-                        <TableHead className="font-semibold w-[10%]">Balance</TableHead>
-                        <TableHead className="font-semibold w-[10%]">Status</TableHead>
-                        <TableHead className="font-semibold w-[10%] whitespace-nowrap text-right pr-4">Created</TableHead>
-                        <TableHead className="text-right font-semibold w-[12%]">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
+                <div className="overflow-x-auto -mx-4 sm:mx-0">
+                  <div className="inline-block min-w-full align-middle">
+                    <Table className="min-w-full">
+                      <TableHeader>
+                        <TableRow className="border-gray-200">
+                          <TableHead className="font-semibold min-w-[140px] sm:min-w-[140px]">Employee / Title</TableHead>
+                          <TableHead className="font-semibold min-w-[100px] hidden sm:table-cell">Title</TableHead>
+                          <TableHead className="font-semibold min-w-[100px] hidden sm:table-cell">Destination</TableHead>
+                          <TableHead className="font-semibold min-w-[90px] whitespace-nowrap">Amount</TableHead>
+                          <TableHead className="font-semibold min-w-[90px] hidden md:table-cell">Balance</TableHead>
+                          <TableHead className="font-semibold min-w-[100px] hidden sm:table-cell">Status</TableHead>
+                          <TableHead className="font-semibold min-w-[100px] whitespace-nowrap text-right pr-2 sm:pr-4 hidden sm:table-cell">Created</TableHead>
+                          <TableHead className="text-right font-semibold min-w-[120px]">Status / Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
                     <TableBody>
                       {filteredExpenses.map((expense) => (
                       <TableRow key={expense.id}>
-                        <TableCell className="text-sm">
+                        <TableCell className="text-xs sm:text-sm">
                           <div>
                             <div className="font-medium truncate">{expense.user_name}</div>
-                            <div className="text-xs text-muted-foreground truncate">{expense.user_email}</div>
+                            <div className="text-xs text-muted-foreground truncate sm:hidden">{expense.user_email}</div>
+                            <div className="font-medium text-xs sm:text-sm mt-1 line-clamp-1 break-words">{expense.title}</div>
+                            <div className="text-xs text-muted-foreground sm:hidden mt-1">{expense.destination}</div>
+                            <div className="text-xs text-muted-foreground sm:hidden mt-1">
+                              {format(new Date(expense.created_at), "MMM d, yyyy")}
+                            </div>
                           </div>
                         </TableCell>
-                        <TableCell className="font-medium text-sm">
+                        <TableCell className="font-medium text-xs sm:text-sm hidden sm:table-cell">
                           <div className="line-clamp-2 break-words">{expense.title}</div>
                         </TableCell>
-                        <TableCell className="text-sm truncate">{expense.destination}</TableCell>
-                        <TableCell className="whitespace-nowrap text-sm">{formatINR(expense.total_amount)}</TableCell>
-                        <TableCell className="text-sm">
+                        <TableCell className="text-xs sm:text-sm truncate hidden sm:table-cell">{expense.destination}</TableCell>
+                        <TableCell className="whitespace-nowrap text-xs sm:text-sm font-medium">{formatINR(expense.total_amount)}</TableCell>
+                        <TableCell className="text-xs sm:text-sm hidden md:table-cell">
                           <div className={`font-medium whitespace-nowrap ${
                             expense.user_balance >= expense.total_amount 
                               ? 'text-green-600' 
@@ -902,56 +901,52 @@ export default function AdminPanel() {
                             </div>
                           )}
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="hidden sm:table-cell">
                           <StatusBadge status={expense.status as any} />
                         </TableCell>
-                        <TableCell className="whitespace-nowrap text-sm text-right pr-4">
+                        <TableCell className="whitespace-nowrap text-xs sm:text-sm text-right pr-2 sm:pr-4 hidden sm:table-cell">
                           {format(new Date(expense.created_at), "MMM d, yyyy")}
                         </TableCell>
                         <TableCell className="text-right">
-                          <div className="flex justify-end">
-                            {expense.status === "approved" || expense.status === "rejected" ? (
-                              <Button
-                                variant="secondary"
-                                size="sm"
-                                className="h-8 px-2 text-xs font-normal text-muted-foreground whitespace-nowrap"
-                                disabled
-                                title={expense.status === "approved" ? "Expense is already approved" : "Expense is rejected"}
-                              >
-                                View
-                              </Button>
-                            ) : (
+                          <div className="flex flex-col sm:flex-row items-end gap-2 sm:gap-0">
+                            <div className="sm:hidden mb-2">
+                              <StatusBadge status={expense.status as any} />
+                            </div>
+                            <div className="flex justify-end">
                               <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-                                <DialogTrigger asChild>
-                                  <Button
-                                    variant="default"
-                                    size="sm"
-                                    className="h-8 px-2 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white whitespace-nowrap"
-                                    onClick={async () => {
-                                      setSelectedExpense(expense);
-                                      setDialogOpen(true);
-                                      // Fetch attachments when opening dialog
-                                      if (expense.id) {
-                                        const { data: attData } = await supabase
-                                          .from("attachments")
-                                          .select("*")
-                                          .eq("expense_id", expense.id)
-                                          .order("created_at", { ascending: false });
-                                        setAttachments(attData || []);
-                                      }
-                                    }}
-                                  >
-                                    Review
-                                  </Button>
+                              <DialogTrigger asChild>
+                                <Button
+                                  variant={expense.status === "approved" || expense.status === "rejected" ? "secondary" : "default"}
+                                  size="sm"
+                                  className={expense.status === "approved" || expense.status === "rejected"
+                                    ? "h-8 px-2 text-xs font-normal whitespace-nowrap"
+                                    : "h-8 px-2 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white whitespace-nowrap"
+                                  }
+                                  onClick={async () => {
+                                    setSelectedExpense(expense);
+                                    setDialogOpen(true);
+                                    // Fetch attachments when opening dialog
+                                    if (expense.id) {
+                                      const { data: attData } = await supabase
+                                        .from("attachments")
+                                        .select("*")
+                                        .eq("expense_id", expense.id)
+                                        .order("created_at", { ascending: false });
+                                      setAttachments(attData || []);
+                                    }
+                                  }}
+                                >
+                                  {expense.status === "approved" || expense.status === "rejected" ? "View" : "View/Approve"}
+                                </Button>
                               </DialogTrigger>
-                              <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto sm:max-w-3xl md:max-w-4xl">
+                              <DialogContent className="max-w-[95vw] sm:max-w-2xl md:max-w-4xl max-h-[95vh] sm:max-h-[85vh] overflow-y-auto p-4 sm:p-6">
                               <DialogHeader>
                                 <DialogTitle>Review and manage this expense submission</DialogTitle>
                               </DialogHeader>
                               
                               {selectedExpense && (
                                 <div className="space-y-4">
-                                  <div className="grid grid-cols-2 gap-4">
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     <div>
                                       <label className="text-sm font-medium">Employee</label>
                                       <p className="text-sm">{selectedExpense.user_name}</p>
@@ -1130,14 +1125,15 @@ export default function AdminPanel() {
                                 )}
                               </DialogFooter>
                               </DialogContent>
-                            </Dialog>
-                          )}
+                              </Dialog>
+                            </div>
                           </div>
                         </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
+                </div>
                 </div>
               )}
             </CardContent>
@@ -1150,125 +1146,7 @@ export default function AdminPanel() {
               )}
             </DialogContent>
           </Dialog>
-        </TabsContent>
-
-        <TabsContent value="users" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>User Management</CardTitle>
-              <CardDescription>Manage user roles and permissions</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {loading ? (
-                <div className="min-h-[400px] flex items-center justify-center">
-                  <p className="text-muted-foreground">Loading...</p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <Table className="table-fixed w-full">
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-[15%]">Name</TableHead>
-                        <TableHead className="w-[18%]">Email</TableHead>
-                        <TableHead className="w-[10%]">Role</TableHead>
-                        <TableHead className="w-[15%]">Engineer</TableHead>
-                        <TableHead className="w-[12%]">Balance</TableHead>
-                        <TableHead className="w-[10%]">Status</TableHead>
-                        <TableHead className="w-[12%]">Joined</TableHead>
-                        <TableHead className="text-right w-[8%]">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                  <TableBody>
-                    {users.map((user) => (
-                      <TableRow key={user.id}>
-                        <TableCell className="font-medium">{user.name}</TableCell>
-                        <TableCell>{user.email}</TableCell>
-                        <TableCell>
-                          <Badge variant={user.role === "admin" ? "default" : "secondary"}>
-                            {user.role}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          {user.role === 'employee' ? (
-                            <Select
-                              value={user.reporting_engineer_id || "none"}
-                              onValueChange={async (value) => {
-                                const newEngineerId = value === "none" ? null : value;
-                                await supabase
-                                  .from('profiles')
-                                  .update({ reporting_engineer_id: newEngineerId })
-                                  .eq('user_id', user.id);
-                                fetchUsers();
-                              }}
-                            >
-                              <SelectTrigger className="w-56 h-8">
-                                <SelectValue placeholder="Select engineer" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="none">Unassigned</SelectItem>
-                                {engineers.map((eng) => (
-                                  <SelectItem key={eng.id} value={eng.id}>
-                                    {eng.name} ({eng.email})
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          ) : (
-                            <span className="text-sm text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Input
-                              type="number"
-                              value={(user.balance ?? 0).toString()}
-                              onChange={async (e) => {
-                                const newVal = parseFloat(e.target.value || '0');
-                                await supabase
-                                  .from('profiles')
-                                  .update({ balance: newVal })
-                                  .eq('user_id', user.id);
-                                fetchUsers();
-                              }}
-                              className="w-28 h-8"
-                            />
-                            <span className="text-xs text-muted-foreground">INR</span>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={user.is_active ? "success" : "destructive"}>
-                            {user.is_active ? "Active" : "Inactive"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          {format(new Date(user.created_at), "MMM d, yyyy")}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Select
-                            value={user.role}
-                            onValueChange={(newRole) => updateUserRole(user.id, newRole)}
-                          >
-                            <SelectTrigger className="w-32">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="employee">Employee</SelectItem>
-                              <SelectItem value="engineer">Engineer</SelectItem>
-                              <SelectItem value="cashier">Cashier</SelectItem>
-                              <SelectItem value="admin">Admin</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+        </div>
     </div>
   );
 }

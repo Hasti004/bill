@@ -621,37 +621,51 @@ export default function Expenses() {
               <div className="mb-4 text-sm text-muted-foreground">
                 Showing {filteredExpenses.length} of {expenses.length} expenses
               </div>
-              <div className="overflow-x-auto">
-                <Table className="table-fixed w-full">
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-[20%]">Title</TableHead>
-                      <TableHead className="w-[18%]">Destination</TableHead>
-                      <TableHead className="w-[15%]">Date</TableHead>
-                      <TableHead className="w-[12%]">Amount</TableHead>
-                      <TableHead className="w-[12%]">Status</TableHead>
-                      <TableHead className="w-[13%]">Created</TableHead>
-                      <TableHead className="text-right w-[10%]">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
+              <div className="overflow-x-auto -mx-4 sm:mx-0">
+                <div className="inline-block min-w-full align-middle">
+                  <Table className="min-w-full">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="min-w-[140px] sm:min-w-[140px]">Title / Destination</TableHead>
+                        <TableHead className="min-w-[100px] hidden sm:table-cell">Destination</TableHead>
+                        <TableHead className="min-w-[100px] hidden sm:table-cell">Date</TableHead>
+                        <TableHead className="min-w-[90px] whitespace-nowrap">Amount</TableHead>
+                        <TableHead className="min-w-[100px] hidden sm:table-cell">Status</TableHead>
+                        <TableHead className="min-w-[100px] hidden sm:table-cell">Created</TableHead>
+                        <TableHead className="text-right min-w-[120px]">Status / Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
                 <TableBody>
                   {filteredExpenses.map((expense) => (
                   <TableRow key={expense.id}>
-                    <TableCell className="font-medium">{expense.title}</TableCell>
-                    <TableCell>{expense.destination}</TableCell>
-                    <TableCell>
+                    <TableCell className="text-xs sm:text-sm">
+                      <div className="font-medium">{expense.title}</div>
+                      <div className="text-xs text-muted-foreground sm:hidden mt-1">{expense.destination}</div>
+                      <div className="text-xs text-muted-foreground sm:hidden mt-1">
+                        {format(new Date(expense.trip_start), "MMM d, yyyy")}
+                      </div>
+                      <div className="text-xs text-muted-foreground sm:hidden mt-1">
+                        {format(new Date(expense.created_at), "MMM d, yyyy")}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-xs sm:text-sm hidden sm:table-cell">{expense.destination}</TableCell>
+                    <TableCell className="text-xs sm:text-sm hidden sm:table-cell">
                       {format(new Date(expense.trip_start), "MMM d, yyyy")}
                     </TableCell>
-                    <TableCell className="whitespace-nowrap">{formatINR(expense.total_amount)}</TableCell>
-                    <TableCell>
+                    <TableCell className="whitespace-nowrap text-xs sm:text-sm font-medium">{formatINR(expense.total_amount)}</TableCell>
+                    <TableCell className="hidden sm:table-cell">
                       <StatusBadge status={expense.status as any} />
                     </TableCell>
-                    <TableCell className="whitespace-nowrap">
+                    <TableCell className="whitespace-nowrap text-xs sm:text-sm hidden sm:table-cell">
                       {format(new Date(expense.created_at), "MMM d, yyyy")}
                     </TableCell>
                     <TableCell className="text-right">
-                      <div className="flex justify-end">
-                        <DropdownMenu>
+                      <div className="flex flex-col sm:flex-row items-end gap-2 sm:gap-0">
+                        <div className="sm:hidden">
+                          <StatusBadge status={expense.status as any} />
+                        </div>
+                        <div className="flex justify-end">
+                          <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
                               <MoreVertical className="h-4 w-4" />
@@ -683,12 +697,14 @@ export default function Expenses() {
                             )}
                           </DropdownMenuContent>
                         </DropdownMenu>
+                        </div>
                       </div>
                     </TableCell>
                   </TableRow>
                 ))}
                 </TableBody>
               </Table>
+              </div>
               </div>
             </>
           )}

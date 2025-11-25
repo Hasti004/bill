@@ -120,12 +120,25 @@ export function AppSidebar() {
                   </NavLink>
                 </SidebarMenuItem>
               ))}
+              
+              {/* Sign Out Button - Higher on Mobile */}
+              <SidebarMenuItem className="block sm:hidden mt-2">
+                <Button
+                  variant="ghost"
+                  className="w-full justify-start h-10 text-sm"
+                  onClick={() => signOut()}
+                >
+                  <LogOut className="mr-2 h-4 w-4 flex-shrink-0" />
+                  <span className="truncate">Sign Out</span>
+                </Button>
+              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter className="px-2 sm:px-0">
+      {/* Sign Out Button - Footer for Desktop */}
+      <SidebarFooter className="px-2 sm:px-0 hidden sm:block">
         <Button
           variant="ghost"
           className="w-full justify-start h-10 sm:h-9 text-sm"
