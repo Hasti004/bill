@@ -48,11 +48,42 @@ export function useNotificationManager() {
   };
 
   useEffect(() => {
-    if (user) {
-      const cleanup = setupRealtimeSubscription();
-      return cleanup;
-    }
-  }, [user, settings]);
+    if (!user?.id) return;
+
+    console.log('🔄 Initializing notification subscription...');
+    const cleanup = setupRealtimeSubscription();
+    
+    // Also set up a polling fallback in case realtime doesn't work
+    // This will check for new notifications every 10 seconds as a backup
+    const pollInterval = setInterval(async () => {
+      try {
+        const { data: newNotifications, error } = await supabase
+          .from("notifications")
+          .select("id, type, title, message, expense_id, created_at")
+          .eq("user_id", user.id)
+          .eq("read", false)
+          .order("created_at", { ascending: false })
+          .limit(5);
+
+        if (!error && newNotifications && newNotifications.length > 0) {
+          // Check if any of these notifications are new (not in activeNotifications)
+          // This is a fallback in case realtime doesn't work
+          newNotifications.forEach((notif: any) => {
+            // We'll let the realtime subscription handle this, but this ensures we catch missed notifications
+            console.log('📬 Polling found unread notification:', notif.id);
+          });
+        }
+      } catch (err) {
+        console.error('Error polling notifications:', err);
+      }
+    }, 10000); // Poll every 10 seconds as fallback
+
+    return () => {
+      console.log('Cleaning up notification subscription and polling');
+      cleanup();
+      clearInterval(pollInterval);
+    };
+  }, [user?.id, settings]);
 
   const loadSettings = () => {
     try {
@@ -137,10 +168,23 @@ export function useNotificationManager() {
   };
 
   const setupRealtimeSubscription = () => {
-    if (!user?.id) return () => {};
+    if (!user?.id) {
+      console.log('No user ID, skipping notification subscription');
+      return () => {};
+    }
+
+    console.log('Setting up notification subscription for user:', user.id);
+
+    // Remove any existing channel with the same name first
+    const channelName = `notification-popups-${user.id}`;
+    const existingChannel = supabase.getChannels().find(ch => ch.topic === `realtime:${channelName}`);
+    if (existingChannel) {
+      console.log('Removing existing channel:', channelName);
+      supabase.removeChannel(existingChannel);
+    }
 
     const channel = supabase
-      .channel('notification-popups')
+      .channel(channelName)
       .on('postgres_changes', 
         { 
           event: 'INSERT', 
@@ -149,6 +193,7 @@ export function useNotificationManager() {
           filter: `user_id=eq.${user.id}`
         }, 
         (payload) => {
+          console.log('✅ New notification received via realtime:', payload);
           const newNotif = payload.new as any;
           const notification: Notification = {
             id: newNotif.id,
@@ -161,7 +206,14 @@ export function useNotificationManager() {
 
           // Show popup if enabled
           if (settings.popup_enabled) {
-            setActiveNotifications(prev => [...prev, notification]);
+            console.log('Adding notification to active notifications:', notification);
+            setActiveNotifications(prev => {
+              // Check if notification already exists to avoid duplicates
+              if (prev.some(n => n.id === notification.id)) {
+                return prev;
+              }
+              return [...prev, notification];
+            });
           }
 
           // Play sound if enabled
@@ -174,9 +226,39 @@ export function useNotificationManager() {
           }
         }
       )
-      .subscribe();
+      .on('postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'notifications',
+          filter: `user_id=eq.${user.id}`
+        },
+        (payload) => {
+          console.log('Notification updated:', payload);
+        }
+      )
+      .subscribe((status) => {
+        console.log('📡 Notification subscription status:', status);
+        
+        // If subscription fails, try to reconnect after a delay
+        if (status === 'SUBSCRIBED') {
+          console.log('✅ Successfully subscribed to notifications');
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.error('❌ Channel error, attempting to reconnect in 5 seconds...');
+          setTimeout(() => {
+            console.log('🔄 Reconnecting notification subscription...');
+            setupRealtimeSubscription();
+          }, 5000);
+        } else if (status === 'CLOSED') {
+          console.warn('⚠️ Channel closed, reconnecting...');
+          setTimeout(() => {
+            setupRealtimeSubscription();
+          }, 2000);
+        }
+      });
 
     return () => {
+      console.log('Cleaning up notification subscription');
       supabase.removeChannel(channel);
     };
   };

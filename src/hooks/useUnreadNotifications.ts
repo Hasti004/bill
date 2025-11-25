@@ -31,7 +31,7 @@ export function useUnreadNotifications() {
     fetchUnreadCount();
 
     const channel = supabase
-      .channel('unread-notifications-count')
+      .channel(`unread-notifications-count-${user.id}`)
       .on('postgres_changes', 
         { 
           event: 'INSERT', 
@@ -40,6 +40,7 @@ export function useUnreadNotifications() {
           filter: `user_id=eq.${user.id}`
         }, 
         (payload) => {
+          console.log('Unread notification inserted:', payload);
           const newNotif = payload.new as any;
           // Only increment if notification is unread
           if (!newNotif.read) {
@@ -70,7 +71,9 @@ export function useUnreadNotifications() {
           }
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('Unread count subscription status:', status);
+      });
 
     return () => {
       supabase.removeChannel(channel);

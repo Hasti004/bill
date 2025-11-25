@@ -98,6 +98,9 @@ export default function EngineerReview() {
   useEffect(() => {
     if (userRole === "engineer") {
       fetchAssignedExpenses();
+      // Set up real-time subscription for new expenses
+      const cleanup = setupRealtimeSubscription();
+      return cleanup;
     }
   }, [userRole, user, timePeriod]);
 
@@ -221,7 +224,7 @@ export default function EngineerReview() {
       });
 
       setAllExpenses(merged);
-      
+
       // Apply search filter
       applyFilters(merged);
     } catch (error) {
@@ -229,6 +232,92 @@ export default function EngineerReview() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const setupRealtimeSubscription = () => {
+    if (!user?.id || userRole !== "engineer") return () => {};
+
+    // Get employee IDs assigned to this engineer
+    const getEmployeeIds = async () => {
+      const { data: employeeProfiles } = await supabase
+        .from("profiles")
+        .select("user_id")
+        .eq("reporting_engineer_id", user.id);
+      return (employeeProfiles || []).map(p => p.user_id);
+    };
+
+    let employeeIds: string[] = [];
+    
+    // Initialize employee IDs
+    getEmployeeIds().then(ids => {
+      employeeIds = ids;
+    });
+
+    const channel = supabase
+      .channel(`engineer-expenses-${user.id}`)
+      .on('postgres_changes', 
+        { 
+          event: 'INSERT', 
+          schema: 'public', 
+          table: 'expenses',
+        }, 
+        async (payload) => {
+          const newExpense = payload.new as any;
+          
+          // Check if this expense belongs to an employee assigned to this engineer
+          // Refresh employee IDs in case assignments changed
+          employeeIds = await getEmployeeIds();
+          
+          if (employeeIds.includes(newExpense.user_id) && 
+              (newExpense.status === "submitted" || newExpense.status === "verified")) {
+            console.log('New expense assigned to engineer:', newExpense);
+            // Refresh the expenses list
+            fetchAssignedExpenses();
+          }
+        }
+      )
+      .on('postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'expenses',
+        },
+        async (payload) => {
+          const updatedExpense = payload.new as any;
+          
+          // Refresh employee IDs
+          employeeIds = await getEmployeeIds();
+          
+          // If expense status changed or it was assigned to this engineer's employee
+          if (employeeIds.includes(updatedExpense.user_id)) {
+            console.log('Expense updated for engineer:', updatedExpense);
+            fetchAssignedExpenses();
+          }
+        }
+      )
+      .on('postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'notifications',
+          filter: `user_id=eq.${user.id}`
+        },
+        (payload) => {
+          const newNotif = payload.new as any;
+          if (newNotif.type === "expense_submitted" || newNotif.type === "expense_assigned") {
+            console.log('New notification for engineer:', newNotif);
+            // Refresh expenses when notification arrives
+            fetchAssignedExpenses();
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log('Engineer expenses subscription status:', status);
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   };
 
   const applyFilters = (expensesList: Expense[]) => {

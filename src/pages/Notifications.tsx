@@ -43,7 +43,8 @@ export default function Notifications() {
     if (user) {
       fetchNotifications();
       // Set up real-time subscription for new notifications
-      setupRealtimeSubscription();
+      const cleanup = setupRealtimeSubscription();
+      return cleanup;
     }
   }, [user]);
 
@@ -92,10 +93,10 @@ export default function Notifications() {
   };
 
   const setupRealtimeSubscription = () => {
-    if (!user?.id) return;
+    if (!user?.id) return () => {};
 
     const channel = supabase
-      .channel('notifications')
+      .channel(`notifications-${user.id}`)
       .on('postgres_changes', 
         { 
           event: 'INSERT', 
@@ -104,6 +105,7 @@ export default function Notifications() {
           filter: `user_id=eq.${user.id}`
         }, 
         (payload) => {
+          console.log('New notification received in Notifications page:', payload);
           // Handle new notification
           const newNotif = payload.new as any;
           toast({
@@ -113,7 +115,20 @@ export default function Notifications() {
           fetchNotifications();
         }
       )
-      .subscribe();
+      .on('postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'notifications',
+          filter: `user_id=eq.${user.id}`
+        },
+        () => {
+          fetchNotifications();
+        }
+      )
+      .subscribe((status) => {
+        console.log('Notifications page subscription status:', status);
+      });
 
     return () => {
       supabase.removeChannel(channel);

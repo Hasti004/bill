@@ -51,10 +51,28 @@ export default function Dashboard() {
     if (user) {
       fetchStats();
       fetchNotifications();
-      const cleanup = setupRealtimeSubscription();
-      return cleanup;
     }
   }, [user, userRole]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    console.log('🔄 Initializing dashboard notification subscription...');
+    const cleanup = setupRealtimeSubscription();
+    
+    // Polling fallback - check for new notifications every 5 seconds
+    // This ensures notifications appear even if realtime isn't working
+    const pollInterval = setInterval(() => {
+      console.log('🔄 Polling for new notifications...');
+      fetchNotifications();
+    }, 5000); // Poll every 5 seconds
+
+    return () => {
+      console.log('Cleaning up dashboard subscription and polling');
+      cleanup();
+      clearInterval(pollInterval);
+    };
+  }, [user?.id]);
 
   const fetchStats = async () => {
     try {
@@ -180,7 +198,10 @@ export default function Dashboard() {
         .order("created_at", { ascending: false })
         .limit(2);
 
-      if (notificationsError) throw notificationsError;
+      if (notificationsError) {
+        console.error("Error fetching notifications:", notificationsError);
+        return;
+      }
 
       // Convert to notification format
       const notificationData = (notificationsData || []).map(notif => ({
@@ -194,17 +215,39 @@ export default function Dashboard() {
         read: notif.read,
       }));
 
-      setNotifications(notificationData);
+      // Only update if notifications actually changed to avoid unnecessary re-renders
+      setNotifications(prev => {
+        const prevIds = prev.map(n => n.id).sort().join(',');
+        const newIds = notificationData.map(n => n.id).sort().join(',');
+        if (prevIds !== newIds) {
+          console.log('📬 Dashboard: New notifications detected, updating...');
+          return notificationData;
+        }
+        return prev;
+      });
     } catch (error) {
       console.error("Error fetching notifications:", error);
     }
   };
 
   const setupRealtimeSubscription = () => {
-    if (!user?.id) return;
+    if (!user?.id) {
+      console.log('No user ID, skipping dashboard subscription');
+      return () => {};
+    }
+
+    console.log('Setting up dashboard notification subscription for user:', user.id);
+
+    // Remove any existing channel with the same name first
+    const channelName = `dashboard-notifications-${user.id}`;
+    const existingChannel = supabase.getChannels().find(ch => ch.topic === `realtime:${channelName}`);
+    if (existingChannel) {
+      console.log('Removing existing dashboard channel:', channelName);
+      supabase.removeChannel(existingChannel);
+    }
 
     const channel = supabase
-      .channel('dashboard-notifications')
+      .channel(channelName)
       .on('postgres_changes', 
         { 
           event: 'INSERT', 
@@ -212,8 +255,32 @@ export default function Dashboard() {
           table: 'notifications',
           filter: `user_id=eq.${user.id}`
         }, 
-        () => {
-          fetchNotifications();
+        (payload) => {
+          console.log('✅ Dashboard: New notification received via realtime:', payload);
+          // Immediately update notifications state
+          const newNotif = payload.new as any;
+          const notification: Notification = {
+            id: newNotif.id,
+            type: newNotif.type,
+            title: newNotif.title,
+            message: newNotif.message,
+            expense_id: newNotif.expense_id || null,
+            created_at: newNotif.created_at,
+            read: newNotif.read || false,
+          };
+          
+          setNotifications(prev => {
+            // Check if notification already exists
+            if (prev.some(n => n.id === notification.id)) {
+              return prev;
+            }
+            // Add new notification at the beginning, keep only 2 most recent
+            console.log('📬 Dashboard: Adding new notification to state:', notification);
+            return [notification, ...prev].slice(0, 2);
+          });
+          
+          fetchNotifications(); // Also fetch to get expense title and ensure consistency
+          fetchStats(); // Also refresh stats when new notification arrives
         }
       )
       .on('postgres_changes',
@@ -223,13 +290,26 @@ export default function Dashboard() {
           table: 'notifications',
           filter: `user_id=eq.${user.id}`
         },
-        () => {
+        (payload) => {
+          console.log('Dashboard: Notification updated:', payload);
           fetchNotifications();
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('📡 Dashboard notification subscription status:', status);
+        
+        if (status === 'SUBSCRIBED') {
+          console.log('✅ Dashboard: Successfully subscribed to notifications');
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.error('❌ Dashboard: Channel error, attempting to reconnect...');
+          setTimeout(() => {
+            setupRealtimeSubscription();
+          }, 5000);
+        }
+      });
 
     return () => {
+      console.log('Cleaning up dashboard notification subscription');
       supabase.removeChannel(channel);
     };
   };
