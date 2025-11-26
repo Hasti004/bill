@@ -63,6 +63,28 @@ export default function Expenses() {
     if (user) {
       fetchExpenses();
       fetchUserBalance();
+      
+      // Set up real-time balance subscription
+      const balanceChannel = supabase
+        .channel(`expenses-balance-${user.id}`)
+        .on('postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'profiles',
+            filter: `user_id=eq.${user.id}`
+          },
+          (payload) => {
+            console.log('Balance updated via realtime:', payload);
+            const newBalance = (payload.new as any)?.balance ?? 0;
+            setUserBalance(newBalance);
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(balanceChannel);
+      };
     }
   }, [user]);
 
@@ -219,38 +241,59 @@ export default function Expenses() {
       if (userRole === "engineer" || userRole === "employee") {
         targetRole = "cashier";
         
-        // Find the original cashier who assigned money to this employee
-        // Using FIFO (First In First Out) - return to the cashier who first assigned money
-        const { data: originalCashierId, error: assignmentError } = await supabase
-          .rpc('get_original_cashier', { recipient_user_id: user.id });
+        // For employees: Find cashier assigned to their manager (engineer)
+        // For engineers: Find cashier assigned to them
+        let managerId: string | null = null;
+        
+        if (userRole === "employee") {
+          // Get employee's reporting engineer (manager)
+          const { data: employeeProfile, error: profileError } = await supabase
+            .from("profiles")
+            .select("reporting_engineer_id")
+            .eq("user_id", user.id)
+            .single();
 
-        if (!assignmentError && originalCashierId) {
-          // Found the original cashier
-          targetUserId = originalCashierId as string;
-          console.log('Found original cashier for return:', targetUserId);
-        } else {
-          console.warn('Could not find original cashier, falling back to any cashier:', assignmentError);
-          // Fallback: Find any cashier if no assignment record exists
-          const { data: targetRoles, error: rolesError } = await supabase
-            .from("user_roles")
-            .select("user_id")
-            .eq("role", targetRole)
-            .limit(1);
-
-          if (rolesError) {
-            console.error("Error finding target role:", rolesError);
-            if (rolesError.message?.includes("permission") || rolesError.message?.includes("policy")) {
-              throw new Error(`Permission denied. Please ensure the database migration for return money feature has been applied.`);
-            }
-            throw rolesError;
+          if (profileError) throw profileError;
+          managerId = (employeeProfile as any)?.reporting_engineer_id || null;
+          
+          if (!managerId) {
+            throw new Error("You don't have a manager assigned. Please contact an administrator.");
           }
-
-          if (!targetRoles || targetRoles.length === 0) {
-            throw new Error(`No ${targetRole} found in the system. Please contact an administrator.`);
-          }
-
-          targetUserId = targetRoles[0].user_id;
+        } else if (userRole === "engineer") {
+          // For engineers, they are their own manager
+          managerId = user.id;
         }
+
+        // Find cashier assigned to this manager
+        // First get all profiles with cashier_assigned_engineer_id matching the manager
+        const { data: cashierProfiles, error: cashierError } = await supabase
+          .from("profiles")
+          .select("user_id")
+          .eq("cashier_assigned_engineer_id", managerId);
+
+        if (cashierError) throw cashierError;
+
+        if (!cashierProfiles || cashierProfiles.length === 0) {
+          throw new Error("Your manager doesn't have a cashier assigned. Please contact an administrator.");
+        }
+
+        // Filter to find which of these users has the cashier role
+        const cashierUserIds = cashierProfiles.map(p => p.user_id);
+        const { data: cashierRoles, error: rolesError } = await supabase
+          .from("user_roles")
+          .select("user_id")
+          .in("user_id", cashierUserIds)
+          .eq("role", "cashier")
+          .limit(1)
+          .maybeSingle();
+
+        if (rolesError) throw rolesError;
+
+        if (!cashierRoles?.user_id) {
+          throw new Error("Your manager doesn't have a cashier assigned. Please contact an administrator.");
+        }
+
+        targetUserId = cashierRoles.user_id;
       } else if (userRole === "cashier") {
         targetRole = "admin";
         
@@ -280,6 +323,27 @@ export default function Expenses() {
         throw new Error("Invalid role for returning money or target user not found");
       }
 
+      // For employees/engineers returning to cashier, create a return request (requires approval)
+      if ((userRole === "engineer" || userRole === "employee") && targetRole === "cashier") {
+        // Create a return request (requires cashier approval)
+        const { MoneyReturnService } = await import("@/services/MoneyReturnService");
+        await MoneyReturnService.createReturnRequest(user.id, targetUserId, amount);
+
+        // Refresh balance (request doesn't change balance yet)
+        fetchUserBalance();
+
+        // Update local state
+        setReturnAmount("");
+        setReturnMoneyDialogOpen(false);
+
+        toast({
+          title: "Return Request Submitted",
+          description: `Your return request of ${formatINR(amount)} has been sent to your cashier for approval. You will be notified once it's approved.`,
+        });
+        return;
+      }
+
+      // For cashiers returning to admin, process immediately (no approval needed)
       // Get target user's current balance
       const { data: targetProfile, error: targetError } = await supabase
         .from("profiles")
@@ -306,49 +370,6 @@ export default function Expenses() {
         .eq("user_id", targetUserId);
 
       if (targetBalanceError) throw targetBalanceError;
-
-      // Mark the money assignment as returned if employee/engineer is returning to cashier
-      if ((userRole === "engineer" || userRole === "employee") && targetRole === "cashier") {
-        // Find and mark the oldest unreturned assignment(s) as returned
-        // We'll mark assignments totaling the returned amount (FIFO)
-        let remainingAmount = amount;
-        
-        const { data: assignments, error: assignmentsError } = await supabase
-          .from("money_assignments")
-          .select("id, amount")
-          .eq("recipient_id", user.id)
-          .eq("cashier_id", targetUserId)
-          .eq("is_returned", false)
-          .order("assigned_at", { ascending: true });
-
-        if (!assignmentsError && assignments && assignments.length > 0) {
-          // Mark assignments as returned, starting from the oldest
-          for (const assignment of assignments) {
-            if (remainingAmount <= 0) break;
-            
-            const assignmentAmount = Math.min(Number(assignment.amount), remainingAmount);
-            
-            // Update the assignment to mark it as returned
-            const { error: updateError } = await supabase
-              .from("money_assignments")
-              .update({
-                is_returned: true,
-                returned_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-              })
-              .eq("id", assignment.id);
-
-            if (updateError) {
-              console.error('Error marking assignment as returned:', updateError);
-              // Don't throw - this is tracking only, transaction already completed
-            } else {
-              console.log('Marked assignment as returned:', assignment.id, 'amount:', assignmentAmount);
-            }
-            
-            remainingAmount -= assignmentAmount;
-          }
-        }
-      }
 
       // Update local state
       setUserBalance(newUserBalance);

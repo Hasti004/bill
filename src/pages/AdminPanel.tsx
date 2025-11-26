@@ -654,7 +654,8 @@ export default function AdminPanel() {
       expense.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
       expense.destination.toLowerCase().includes(searchTerm.toLowerCase()) ||
       expense.user_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      expense.user_email.toLowerCase().includes(searchTerm.toLowerCase());
+      expense.user_email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      ((expense as any).transaction_number || '').toLowerCase().includes(searchTerm.toLowerCase());
     
     const matchesStatus = statusFilter === "all" || expense.status === statusFilter;
     
@@ -835,7 +836,7 @@ export default function AdminPanel() {
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                     <Input
-                      placeholder="Search by title, destination, employee..."
+                      placeholder="Search by title, destination, employee, transaction #..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
                       className="pl-10 h-10 sm:h-12 border-gray-200 focus:border-blue-500 focus:ring-blue-500/20 text-sm"

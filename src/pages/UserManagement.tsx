@@ -1432,10 +1432,9 @@ export default function UserManagement() {
                                 </div>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3">
                                   {item.cashiers.map((cashier, cIdx) => {
-                                    // Count employees managed by this cashier (employees under the engineer that are assigned to this cashier)
-                                    const employeesManaged = item.employees.filter((emp: any) => 
-                                      emp.assigned_cashier_name === cashier.name
-                                    ).length;
+                                    // Count employees managed by this cashier
+                                    // All employees under the engineer are managed by the cashier assigned to that engineer
+                                    const employeesManaged = item.employees.length;
                                     
                                     return (
                                       <div 

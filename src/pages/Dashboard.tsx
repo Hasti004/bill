@@ -59,6 +59,8 @@ export default function Dashboard() {
   const [returnAmount, setReturnAmount] = useState("");
   const [returningMoney, setReturningMoney] = useState(false);
   const [userBalance, setUserBalance] = useState<number | null>(null);
+  const [returnRequests, setReturnRequests] = useState<any[]>([]);
+  const [loadingRequests, setLoadingRequests] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -69,8 +71,88 @@ export default function Dashboard() {
       if (userRole === "employee" || userRole === "engineer" || userRole === "cashier") {
         fetchUserBalance();
       }
+      if (userRole === "cashier") {
+        fetchReturnRequests();
+      }
     }
   }, [user, userRole]);
+
+  const fetchReturnRequests = async () => {
+    if (!user?.id || userRole !== "cashier") return;
+    try {
+      setLoadingRequests(true);
+      const { MoneyReturnService } = await import("@/services/MoneyReturnService");
+      const requests = await MoneyReturnService.getPendingRequests(user.id);
+      
+      // Fetch requester names for all requests
+      const requesterIds = requests.map(r => r.requester_id);
+      if (requesterIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from("profiles")
+          .select("user_id, name")
+          .in("user_id", requesterIds);
+        
+        const nameMap = new Map(profiles?.map(p => [p.user_id, p.name]) || []);
+        const requestsWithNames = requests.map(r => ({
+          ...r,
+          requesterName: nameMap.get(r.requester_id) || "Unknown"
+        }));
+        setReturnRequests(requestsWithNames);
+      } else {
+        setReturnRequests(requests);
+      }
+    } catch (error) {
+      console.error("Error fetching return requests:", error);
+    } finally {
+      setLoadingRequests(false);
+    }
+  };
+
+  const handleApproveRequest = async (requestId: string) => {
+    if (!user?.id) return;
+    try {
+      setLoadingRequests(true);
+      const { MoneyReturnService } = await import("@/services/MoneyReturnService");
+      await MoneyReturnService.approveReturnRequest(requestId, user.id);
+      toast({
+        title: "Request Approved",
+        description: "Money has been transferred successfully.",
+      });
+      fetchReturnRequests();
+      fetchUserBalance();
+      fetchStats();
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Failed to approve request.",
+      });
+    } finally {
+      setLoadingRequests(false);
+    }
+  };
+
+  const handleRejectRequest = async (requestId: string, reason?: string) => {
+    if (!user?.id) return;
+    try {
+      setLoadingRequests(true);
+      const { MoneyReturnService } = await import("@/services/MoneyReturnService");
+      await MoneyReturnService.rejectReturnRequest(requestId, user.id, reason);
+      toast({
+        title: "Request Rejected",
+        description: "The return request has been rejected.",
+      });
+      fetchReturnRequests();
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Failed to reject request.",
+      });
+    } finally {
+      setLoadingRequests(false);
+    }
+  };
 
   const fetchUserBalance = async () => {
     try {
@@ -107,11 +189,36 @@ export default function Dashboard() {
       balanceCleanup = setupBalanceRealtimeSubscription();
     }
 
+    // Set up real-time subscription for return requests (cashiers only)
+    let requestsCleanup = () => {};
+    if (userRole === "cashier") {
+      const requestsChannel = supabase
+        .channel(`cashier-return-requests-${user.id}`)
+        .on('postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'money_return_requests',
+            filter: `cashier_id=eq.${user.id}`
+          },
+          () => {
+            console.log('Return request updated, refreshing...');
+            fetchReturnRequests();
+          }
+        )
+        .subscribe();
+      
+      requestsCleanup = () => {
+        supabase.removeChannel(requestsChannel);
+      };
+    }
+
     return () => {
       console.log('Cleaning up dashboard subscription and polling');
       cleanup();
       clearInterval(pollInterval);
       balanceCleanup();
+      requestsCleanup();
     };
   }, [user?.id, userRole]);
 
@@ -463,26 +570,77 @@ export default function Dashboard() {
       let targetUserId: string | null = null;
 
       if (userRole === "employee" || userRole === "engineer") {
-        // Get the employee's or engineer's assigned cashier
-        const { data: profile, error: profileError } = await supabase
+        // For employees: Find cashier assigned to their manager (engineer)
+        // For engineers: Find cashier assigned to them
+        let managerId: string | null = null;
+        
+        if (userRole === "employee") {
+          // Get employee's reporting engineer (manager)
+          const { data: employeeProfile, error: profileError } = await supabase
+            .from("profiles")
+            .select("reporting_engineer_id")
+            .eq("user_id", user.id)
+            .single();
+
+          if (profileError) throw profileError;
+          managerId = (employeeProfile as any)?.reporting_engineer_id || null;
+          
+          if (!managerId) {
+            toast({
+              variant: "destructive",
+              title: "No Manager Assigned",
+              description: "You don't have a manager assigned. Please contact an administrator.",
+            });
+            setReturningMoney(false);
+            return;
+          }
+        } else if (userRole === "engineer") {
+          // For engineers, they are their own manager
+          managerId = user.id;
+        }
+
+        // Find cashier assigned to this manager
+        // First get all profiles with cashier_assigned_engineer_id matching the manager
+        const { data: cashierProfiles, error: cashierError } = await supabase
           .from("profiles")
-          .select("assigned_cashier_id")
-          .eq("user_id", user.id)
-          .single();
+          .select("user_id")
+          .eq("cashier_assigned_engineer_id", managerId);
 
-        if (profileError) throw profileError;
+        if (cashierError) throw cashierError;
 
-        if (!profile?.assigned_cashier_id) {
+        if (!cashierProfiles || cashierProfiles.length === 0) {
           toast({
             variant: "destructive",
             title: "No Cashier Assigned",
-            description: "You don't have a cashier assigned. Please contact an administrator.",
+            description: "Your manager doesn't have a cashier assigned. Please contact an administrator.",
           });
           setReturningMoney(false);
           return;
         }
 
-        targetUserId = profile.assigned_cashier_id;
+        // Filter to find which of these users has the cashier role
+        const cashierUserIds = cashierProfiles.map(p => p.user_id);
+        const { data: cashierRoles, error: rolesError } = await supabase
+          .from("user_roles")
+          .select("user_id")
+          .in("user_id", cashierUserIds)
+          .eq("role", "cashier")
+          .limit(1)
+          .maybeSingle();
+
+        if (rolesError) throw rolesError;
+
+        if (!cashierRoles?.user_id) {
+          toast({
+            variant: "destructive",
+            title: "No Cashier Assigned",
+            description: "Your manager doesn't have a cashier assigned. Please contact an administrator.",
+          });
+          setReturningMoney(false);
+          return;
+        }
+
+        targetUserId = cashierRoles.user_id;
       } else {
         toast({
           variant: "destructive",
@@ -497,95 +655,22 @@ export default function Dashboard() {
         throw new Error("Target cashier not found");
       }
 
-      // Get target cashier's current balance
-      const { data: targetProfile, error: targetError } = await supabase
-        .from("profiles")
-        .select("balance, name")
-        .eq("user_id", targetUserId)
-        .single();
+      // Create a return request (requires cashier approval)
+      const { MoneyReturnService } = await import("@/services/MoneyReturnService");
+      await MoneyReturnService.createReturnRequest(user.id, targetUserId, amount);
 
-      if (targetError) throw targetError;
-
-      // Deduct from employee's balance
-      const newUserBalance = userBalance - amount;
-      const { error: userBalanceError } = await supabase
-        .from("profiles")
-        .update({ balance: newUserBalance })
-        .eq("user_id", user.id);
-
-      if (userBalanceError) throw userBalanceError;
-
-      // Add to cashier's balance
-      const newTargetBalance = (targetProfile.balance || 0) + amount;
-      const { error: targetBalanceError } = await supabase
-        .from("profiles")
-        .update({ balance: newTargetBalance })
-        .eq("user_id", targetUserId);
-
-      if (targetBalanceError) throw targetBalanceError;
-
-      // Mark the money assignment as returned (FIFO)
-      let remainingAmount = amount;
-      
-      const { data: assignments, error: assignmentsError } = await supabase
-        .from("money_assignments")
-        .select("id, amount")
-        .eq("recipient_id", user.id)
-        .eq("cashier_id", targetUserId)
-        .eq("is_returned", false)
-        .order("assigned_at", { ascending: true });
-
-      if (!assignmentsError && assignments && assignments.length > 0) {
-        // Mark assignments as returned, starting from the oldest
-        for (const assignment of assignments) {
-          if (remainingAmount <= 0) break;
-          
-          const assignmentAmount = Number(assignment.amount);
-          if (assignmentAmount <= remainingAmount) {
-            // Mark entire assignment as returned
-            const { error: updateError } = await supabase
-              .from("money_assignments")
-              .update({
-                is_returned: true,
-                returned_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-              })
-              .eq("id", assignment.id);
-
-            if (updateError) {
-              console.error("Error updating assignment:", updateError);
-            }
-            remainingAmount -= assignmentAmount;
-          } else {
-            // Partial return - would need to handle this if needed
-            // For now, we'll mark the entire assignment
-            const { error: updateError } = await supabase
-              .from("money_assignments")
-              .update({
-                is_returned: true,
-                returned_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-              })
-              .eq("id", assignment.id);
-
-            if (updateError) {
-              console.error("Error updating assignment:", updateError);
-            }
-            remainingAmount = 0;
-            break;
-          }
-        }
-      }
-
-      toast({
-        title: "Money Returned Successfully",
-        description: `${formatINR(amount)} has been returned to ${targetProfile.name}`,
-      });
-
-      setReturnAmount("");
-      setReturnMoneyDialogOpen(false);
+      // Refresh balance and stats (request doesn't change balance yet)
       fetchUserBalance();
       fetchStats();
+
+      // Update local state
+      setReturnAmount("");
+      setReturnMoneyDialogOpen(false);
+
+      toast({
+        title: "Return Request Submitted",
+        description: `Your return request of ${formatINR(amount)} has been sent to your cashier for approval. You will be notified once it's approved.`,
+      });
     } catch (error: any) {
       console.error("Error returning money:", error);
       toast({
@@ -1033,6 +1118,79 @@ export default function Dashboard() {
           </p>
         </CardContent>
       </Card>
+
+      {/* Cashier: Return Money Requests */}
+      {userRole === "cashier" && (
+        <Card>
+          <CardHeader className="px-4 sm:px-6 pt-4 sm:pt-6">
+            <CardTitle className="text-lg sm:text-xl">Pending Return Requests</CardTitle>
+            <CardDescription className="text-sm">Approve or reject money return requests from employees and managers</CardDescription>
+          </CardHeader>
+          <CardContent className="px-4 sm:px-6 pb-4 sm:pb-6">
+            {loadingRequests ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                <span className="ml-2 text-sm text-gray-600">Loading requests...</span>
+              </div>
+            ) : returnRequests.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-8">
+                No pending return requests
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {returnRequests.map((request: any) => (
+                  <Card key={request.id} className="border-2 border-blue-200">
+                    <CardContent className="p-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <h4 className="font-semibold text-sm text-gray-900 truncate">
+                              {request.requesterName || "Unknown"}
+                            </h4>
+                            <span className="text-xs text-gray-500 whitespace-nowrap">
+                              wants to return
+                            </span>
+                          </div>
+                          <p className="text-lg font-bold text-blue-600">
+                            {formatINR(Number(request.amount))}
+                          </p>
+                          <p className="text-xs text-gray-500 mt-1">
+                            Requested {format(new Date(request.requested_at), "MMM d, h:mm a")}
+                          </p>
+                        </div>
+                        <div className="flex gap-2 flex-shrink-0">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              const reason = prompt("Enter rejection reason (optional):");
+                              handleRejectRequest(request.id, reason || undefined);
+                            }}
+                            disabled={loadingRequests}
+                            className="whitespace-nowrap"
+                          >
+                            <XCircle className="h-4 w-4 mr-1" />
+                            Reject
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={() => handleApproveRequest(request.id)}
+                            disabled={loadingRequests}
+                            className="whitespace-nowrap"
+                          >
+                            <CheckCircle className="h-4 w-4 mr-1" />
+                            Approve
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Return Money Dialog */}
       {(userRole === "employee" || userRole === "engineer") && (
