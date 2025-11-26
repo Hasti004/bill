@@ -86,8 +86,16 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
     console.log('Setting up balance real-time subscription in Layout for user:', user.id);
 
+    // Remove any existing channel with the same name first
+    const channelName = `layout-balance-${user.id}`;
+    const existingChannel = supabase.getChannels().find(ch => ch.topic === `realtime:${channelName}`);
+    if (existingChannel) {
+      console.log('Removing existing layout balance channel:', channelName);
+      supabase.removeChannel(existingChannel);
+    }
+
     const channel = supabase
-      .channel(`layout-balance-${user.id}`)
+      .channel(channelName)
       .on('postgres_changes',
         {
           event: 'UPDATE',
@@ -99,17 +107,31 @@ export function Layout({ children }: { children: React.ReactNode }) {
           console.log('✅ Layout: Balance updated via realtime:', payload);
           const newBalance = (payload.new as any)?.balance ?? 0;
           setUserBalance(newBalance);
+          // Also refresh the profile to ensure consistency
+          fetchUserBalance();
         }
       )
       .subscribe((status) => {
         console.log('📡 Layout balance subscription status:', status);
         if (status === 'SUBSCRIBED') {
           console.log('✅ Layout: Successfully subscribed to balance updates');
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.error('❌ Layout: Balance subscription error, retrying...');
+          // Retry subscription after a delay
+          setTimeout(() => {
+            fetchUserBalance();
+          }, 2000);
         }
       });
 
+    // Polling fallback - refresh balance every 5 seconds as backup
+    const pollInterval = setInterval(() => {
+      fetchUserBalance();
+    }, 5000);
+
     return () => {
       console.log('Cleaning up layout balance subscription');
+      clearInterval(pollInterval);
       supabase.removeChannel(channel);
     };
   };

@@ -1,0 +1,413 @@
+import { useEffect, useState } from "react";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { ArrowDown, ArrowUp, Download, RefreshCw } from "lucide-react";
+import { formatINR } from "@/lib/format";
+import { format } from "date-fns";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useToast } from "@/hooks/use-toast";
+import { Badge } from "@/components/ui/badge";
+
+interface MoneyAssignment {
+  id: string;
+  recipient_id: string;
+  recipient_name?: string;
+  amount: number;
+  assigned_at: string;
+  is_returned: boolean;
+  returned_at?: string;
+  return_transaction_id?: string;
+}
+
+interface MoneyReturnRequest {
+  id: string;
+  requester_id: string;
+  requester_name?: string;
+  amount: number;
+  status: "pending" | "approved" | "rejected";
+  requested_at: string;
+  approved_at?: string;
+  rejected_at?: string;
+  rejection_reason?: string;
+}
+
+export default function CashierTransactions() {
+  const { user, userRole } = useAuth();
+  const { toast } = useToast();
+  const [loading, setLoading] = useState(true);
+  const [moneyAssignments, setMoneyAssignments] = useState<MoneyAssignment[]>([]);
+  const [returnRequests, setReturnRequests] = useState<MoneyReturnRequest[]>([]);
+  const [activeTab, setActiveTab] = useState<"assignments" | "returns">("assignments");
+
+  useEffect(() => {
+    if (user && userRole === "cashier") {
+      fetchData();
+    }
+  }, [user, userRole]);
+
+  const fetchData = async () => {
+    if (!user?.id) return;
+    try {
+      setLoading(true);
+      await Promise.all([fetchMoneyAssignments(), fetchReturnRequests()]);
+    } catch (error) {
+      console.error("Error fetching transaction data:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to load transaction history.",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchMoneyAssignments = async () => {
+    if (!user?.id) return;
+    try {
+      // Fetch all money assignments where this cashier is the cashier_id
+      const { data: assignments, error } = await supabase
+        .from("money_assignments")
+        .select("*")
+        .eq("cashier_id", user.id)
+        .order("assigned_at", { ascending: false });
+
+      if (error) throw error;
+
+      // Fetch recipient names
+      const recipientIds = [...new Set(assignments?.map(a => a.recipient_id) || [])];
+      if (recipientIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from("profiles")
+          .select("user_id, name")
+          .in("user_id", recipientIds);
+
+        const nameMap = new Map(profiles?.map(p => [p.user_id, p.name]) || []);
+        const assignmentsWithNames = (assignments || []).map(a => ({
+          ...a,
+          recipient_name: nameMap.get(a.recipient_id) || "Unknown",
+          amount: Number(a.amount),
+        }));
+        setMoneyAssignments(assignmentsWithNames);
+      } else {
+        setMoneyAssignments([]);
+      }
+    } catch (error) {
+      console.error("Error fetching money assignments:", error);
+      throw error;
+    }
+  };
+
+  const fetchReturnRequests = async () => {
+    if (!user?.id) return;
+    try {
+      // Fetch all return requests for this cashier (both pending and completed)
+      const { data: requests, error } = await supabase
+        .from("money_return_requests")
+        .select("*")
+        .eq("cashier_id", user.id)
+        .order("requested_at", { ascending: false });
+
+      if (error) throw error;
+
+      // Fetch requester names
+      const requesterIds = [...new Set(requests?.map(r => r.requester_id) || [])];
+      if (requesterIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from("profiles")
+          .select("user_id, name")
+          .in("user_id", requesterIds);
+
+        const nameMap = new Map(profiles?.map(p => [p.user_id, p.name]) || []);
+        const requestsWithNames = (requests || []).map(r => ({
+          ...r,
+          requester_name: nameMap.get(r.requester_id) || "Unknown",
+          amount: Number(r.amount),
+        }));
+        setReturnRequests(requestsWithNames);
+      } else {
+        setReturnRequests([]);
+      }
+    } catch (error) {
+      console.error("Error fetching return requests:", error);
+      throw error;
+    }
+  };
+
+  const exportToCSV = () => {
+    const allTransactions: any[] = [];
+
+    // Add money assignments
+    moneyAssignments.forEach(assignment => {
+      allTransactions.push({
+        Type: "Money Assignment",
+        Recipient: assignment.recipient_name || "Unknown",
+        Amount: assignment.amount,
+        Date: format(new Date(assignment.assigned_at), "yyyy-MM-dd HH:mm:ss"),
+        Status: assignment.is_returned ? "Returned" : "Active",
+        ReturnedDate: assignment.returned_at ? format(new Date(assignment.returned_at), "yyyy-MM-dd HH:mm:ss") : "",
+      });
+    });
+
+    // Add return requests
+    returnRequests.forEach(request => {
+      allTransactions.push({
+        Type: "Money Return",
+        Requester: request.requester_name || "Unknown",
+        Amount: request.amount,
+        Date: format(new Date(request.requested_at), "yyyy-MM-dd HH:mm:ss"),
+        Status: request.status === "approved" ? "Approved" : request.status === "rejected" ? "Rejected" : "Pending",
+        ApprovedDate: request.approved_at ? format(new Date(request.approved_at), "yyyy-MM-dd HH:mm:ss") : "",
+        RejectedDate: request.rejected_at ? format(new Date(request.rejected_at), "yyyy-MM-dd HH:mm:ss") : "",
+      });
+    });
+
+    // Sort by date (newest first)
+    allTransactions.sort((a, b) => new Date(b.Date).getTime() - new Date(a.Date).getTime());
+
+    // Convert to CSV
+    const headers = Object.keys(allTransactions[0] || {});
+    const csvRows = [
+      headers.join(","),
+      ...allTransactions.map(row =>
+        headers.map(header => {
+          const value = row[header];
+          return typeof value === "string" && value.includes(",")
+            ? `"${value}"`
+            : value;
+        }).join(",")
+      ),
+    ];
+
+    const csvContent = csvRows.join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `cashier-transactions-${format(new Date(), "yyyy-MM-dd")}.csv`);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    toast({
+      title: "Export Successful",
+      description: "Transaction history has been exported to CSV.",
+    });
+  };
+
+  if (userRole !== "cashier") {
+    return (
+      <div className="space-y-4">
+        <Card>
+          <CardContent className="p-6">
+            <p className="text-center text-muted-foreground">
+              This page is only accessible to cashiers.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4 sm:space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Transaction History</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            View all money assignments and return requests
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={fetchData}
+            disabled={loading}
+            className="whitespace-nowrap"
+          >
+            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={exportToCSV}
+            disabled={loading || (moneyAssignments.length === 0 && returnRequests.length === 0)}
+            className="whitespace-nowrap"
+          >
+            <Download className="h-4 w-4 mr-2" />
+            Export CSV
+          </Button>
+        </div>
+      </div>
+
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "assignments" | "returns")} className="w-full">
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="assignments" className="whitespace-nowrap">
+            <ArrowDown className="h-4 w-4 mr-2" />
+            Money Assignments ({moneyAssignments.length})
+          </TabsTrigger>
+          <TabsTrigger value="returns" className="whitespace-nowrap">
+            <ArrowUp className="h-4 w-4 mr-2" />
+            Return Requests ({returnRequests.length})
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="assignments" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Money Assignments</CardTitle>
+              <CardDescription>
+                Money you've assigned to employees and managers
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {loading ? (
+                <div className="flex items-center justify-center py-8">
+                  <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                  <span className="ml-2 text-sm text-gray-600">Loading...</span>
+                </div>
+              ) : moneyAssignments.length === 0 ? (
+                <p className="text-center text-muted-foreground py-8">
+                  No money assignments found
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="whitespace-nowrap">Recipient</TableHead>
+                        <TableHead className="whitespace-nowrap">Amount</TableHead>
+                        <TableHead className="whitespace-nowrap">Assigned Date</TableHead>
+                        <TableHead className="whitespace-nowrap">Status</TableHead>
+                        <TableHead className="whitespace-nowrap">Returned Date</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {moneyAssignments.map((assignment) => (
+                        <TableRow key={assignment.id}>
+                          <TableCell className="font-medium truncate max-w-[200px]">
+                            {assignment.recipient_name || "Unknown"}
+                          </TableCell>
+                          <TableCell className="font-semibold">
+                            {formatINR(assignment.amount)}
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap">
+                            {format(new Date(assignment.assigned_at), "MMM d, yyyy h:mm a")}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={assignment.is_returned ? "secondary" : "default"}>
+                              {assignment.is_returned ? "Returned" : "Active"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap">
+                            {assignment.returned_at
+                              ? format(new Date(assignment.returned_at), "MMM d, yyyy h:mm a")
+                              : "-"}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="returns" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Return Requests</CardTitle>
+              <CardDescription>
+                Money return requests from employees and managers
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {loading ? (
+                <div className="flex items-center justify-center py-8">
+                  <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                  <span className="ml-2 text-sm text-gray-600">Loading...</span>
+                </div>
+              ) : returnRequests.length === 0 ? (
+                <p className="text-center text-muted-foreground py-8">
+                  No return requests found
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="whitespace-nowrap">Requester</TableHead>
+                        <TableHead className="whitespace-nowrap">Amount</TableHead>
+                        <TableHead className="whitespace-nowrap">Requested Date</TableHead>
+                        <TableHead className="whitespace-nowrap">Status</TableHead>
+                        <TableHead className="whitespace-nowrap">Processed Date</TableHead>
+                        <TableHead className="whitespace-nowrap">Rejection Reason</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {returnRequests.map((request) => (
+                        <TableRow key={request.id}>
+                          <TableCell className="font-medium truncate max-w-[200px]">
+                            {request.requester_name || "Unknown"}
+                          </TableCell>
+                          <TableCell className="font-semibold">
+                            {formatINR(request.amount)}
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap">
+                            {format(new Date(request.requested_at), "MMM d, yyyy h:mm a")}
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant={
+                                request.status === "approved"
+                                  ? "default"
+                                  : request.status === "rejected"
+                                  ? "destructive"
+                                  : "secondary"
+                              }
+                            >
+                              {request.status === "approved"
+                                ? "Approved"
+                                : request.status === "rejected"
+                                ? "Rejected"
+                                : "Pending"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap">
+                            {request.approved_at
+                              ? format(new Date(request.approved_at), "MMM d, yyyy h:mm a")
+                              : request.rejected_at
+                              ? format(new Date(request.rejected_at), "MMM d, yyyy h:mm a")
+                              : "-"}
+                          </TableCell>
+                          <TableCell className="max-w-[200px] truncate">
+                            {request.rejection_reason || "-"}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+

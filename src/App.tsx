@@ -21,6 +21,7 @@ import Reports from "./pages/Reports";
 import CategoryManagement from "./pages/CategoryManagement";
 import Settings from "./pages/Settings";
 import NotificationSettings from "./pages/NotificationSettings";
+import CashierTransactions from "./pages/CashierTransactions";
 
 const queryClient = new QueryClient();
 
@@ -169,6 +170,16 @@ const App = () => (
                 <ProtectedRoute allowedRoles={["employee", "admin", "cashier"]}>
                   <Layout>
                     <Analytics />
+                  </Layout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/cashier/transactions"
+              element={
+                <ProtectedRoute allowedRoles={["cashier"]}>
+                  <Layout>
+                    <CashierTransactions />
                   </Layout>
                 </ProtectedRoute>
               }

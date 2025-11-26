@@ -63,6 +63,7 @@ export function AppSidebar() {
     { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
     { title: "All Expenses", url: "/admin/expenses", icon: Receipt },
     { title: "Balances", url: "/balances", icon: FileText },
+    { title: "Transaction History", url: "/cashier/transactions", icon: History },
     { title: "Analytics", url: "/analytics", icon: BarChart3 },
     { title: "Notifications", url: "/notifications", icon: Bell },
     { title: "Settings", url: "/settings", icon: SettingsIcon },
