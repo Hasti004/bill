@@ -66,13 +66,18 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (user) {
-      fetchStats();
-      fetchNotifications();
-      if (userRole === "employee" || userRole === "engineer" || userRole === "cashier") {
-        fetchUserBalance();
-      }
-      if (userRole === "cashier") {
-        fetchReturnRequests();
+      try {
+        fetchStats();
+        fetchNotifications();
+        if (userRole === "employee" || userRole === "engineer" || userRole === "cashier") {
+          fetchUserBalance();
+        }
+        if (userRole === "cashier") {
+          fetchReturnRequests();
+        }
+      } catch (error) {
+        console.error("Error in Dashboard useEffect:", error);
+        // Don't crash the page, just log the error
       }
     }
   }, [user, userRole]);
@@ -81,28 +86,36 @@ export default function Dashboard() {
     if (!user?.id || userRole !== "cashier") return;
     try {
       setLoadingRequests(true);
-      const { MoneyReturnService } = await import("@/services/MoneyReturnService");
-      const requests = await MoneyReturnService.getPendingRequests(user.id);
-      
-      // Fetch requester names for all requests
-      const requesterIds = requests.map(r => r.requester_id);
-      if (requesterIds.length > 0) {
-        const { data: profiles } = await supabase
-          .from("profiles")
-          .select("user_id, name")
-          .in("user_id", requesterIds);
+      // Try to import the service, but don't crash if it fails
+      try {
+        const { MoneyReturnService } = await import("@/services/MoneyReturnService");
+        const requests = await MoneyReturnService.getPendingRequests(user.id);
         
-        const nameMap = new Map(profiles?.map(p => [p.user_id, p.name]) || []);
-        const requestsWithNames = requests.map(r => ({
-          ...r,
-          requesterName: nameMap.get(r.requester_id) || "Unknown"
-        }));
-        setReturnRequests(requestsWithNames);
-      } else {
-        setReturnRequests(requests);
+        // Fetch requester names for all requests
+        const requesterIds = requests.map(r => r.requester_id);
+        if (requesterIds.length > 0) {
+          const { data: profiles } = await supabase
+            .from("profiles")
+            .select("user_id, name")
+            .in("user_id", requesterIds);
+          
+          const nameMap = new Map(profiles?.map(p => [p.user_id, p.name]) || []);
+          const requestsWithNames = requests.map(r => ({
+            ...r,
+            requesterName: nameMap.get(r.requester_id) || "Unknown"
+          }));
+          setReturnRequests(requestsWithNames);
+        } else {
+          setReturnRequests(requests);
+        }
+      } catch (importError) {
+        // If the service or table doesn't exist yet, just set empty array
+        console.warn("MoneyReturnService not available yet:", importError);
+        setReturnRequests([]);
       }
     } catch (error) {
       console.error("Error fetching return requests:", error);
+      setReturnRequests([]);
     } finally {
       setLoadingRequests(false);
     }
@@ -112,15 +125,23 @@ export default function Dashboard() {
     if (!user?.id) return;
     try {
       setLoadingRequests(true);
-      const { MoneyReturnService } = await import("@/services/MoneyReturnService");
-      await MoneyReturnService.approveReturnRequest(requestId, user.id);
-      toast({
-        title: "Request Approved",
-        description: "Money has been transferred successfully.",
-      });
-      fetchReturnRequests();
-      fetchUserBalance();
-      fetchStats();
+      try {
+        const { MoneyReturnService } = await import("@/services/MoneyReturnService");
+        await MoneyReturnService.approveReturnRequest(requestId, user.id);
+        toast({
+          title: "Request Approved",
+          description: "Money has been transferred successfully.",
+        });
+        fetchReturnRequests();
+        fetchUserBalance();
+        fetchStats();
+      } catch (importError: any) {
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: importError.message || "Service not available. Please ensure the database migration has been run.",
+        });
+      }
     } catch (error: any) {
       toast({
         variant: "destructive",
@@ -136,13 +157,21 @@ export default function Dashboard() {
     if (!user?.id) return;
     try {
       setLoadingRequests(true);
-      const { MoneyReturnService } = await import("@/services/MoneyReturnService");
-      await MoneyReturnService.rejectReturnRequest(requestId, user.id, reason);
-      toast({
-        title: "Request Rejected",
-        description: "The return request has been rejected.",
-      });
-      fetchReturnRequests();
+      try {
+        const { MoneyReturnService } = await import("@/services/MoneyReturnService");
+        await MoneyReturnService.rejectReturnRequest(requestId, user.id, reason);
+        toast({
+          title: "Request Rejected",
+          description: "The return request has been rejected.",
+        });
+        fetchReturnRequests();
+      } catch (importError: any) {
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: importError.message || "Service not available. Please ensure the database migration has been run.",
+        });
+      }
     } catch (error: any) {
       toast({
         variant: "destructive",
@@ -173,53 +202,79 @@ export default function Dashboard() {
   useEffect(() => {
     if (!user?.id) return;
 
-    console.log('🔄 Initializing dashboard notification subscription...');
-    const cleanup = setupRealtimeSubscription();
-    
-    // Polling fallback - check for new notifications every 5 seconds
-    // This ensures notifications appear even if realtime isn't working
-    const pollInterval = setInterval(() => {
-      console.log('🔄 Polling for new notifications...');
-      fetchNotifications();
-    }, 5000); // Poll every 5 seconds
-
-    // Set up real-time balance subscription for employees, engineers, and cashiers
-    let balanceCleanup = () => {};
-    if (userRole === "employee" || userRole === "engineer" || userRole === "cashier") {
-      balanceCleanup = setupBalanceRealtimeSubscription();
-    }
-
-    // Set up real-time subscription for return requests (cashiers only)
-    let requestsCleanup = () => {};
-    if (userRole === "cashier") {
-      const requestsChannel = supabase
-        .channel(`cashier-return-requests-${user.id}`)
-        .on('postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'money_return_requests',
-            filter: `cashier_id=eq.${user.id}`
-          },
-          () => {
-            console.log('Return request updated, refreshing...');
-            fetchReturnRequests();
-          }
-        )
-        .subscribe();
+    try {
+      console.log('🔄 Initializing dashboard notification subscription...');
+      const cleanup = setupRealtimeSubscription();
       
-      requestsCleanup = () => {
-        supabase.removeChannel(requestsChannel);
-      };
-    }
+      // Polling fallback - check for new notifications every 5 seconds
+      // This ensures notifications appear even if realtime isn't working
+      const pollInterval = setInterval(() => {
+        try {
+          console.log('🔄 Polling for new notifications...');
+          fetchNotifications();
+        } catch (error) {
+          console.warn("Error polling notifications:", error);
+        }
+      }, 5000); // Poll every 5 seconds
 
-    return () => {
-      console.log('Cleaning up dashboard subscription and polling');
-      cleanup();
-      clearInterval(pollInterval);
-      balanceCleanup();
-      requestsCleanup();
-    };
+      // Set up real-time balance subscription for employees, engineers, and cashiers
+      let balanceCleanup = () => {};
+      if (userRole === "employee" || userRole === "engineer" || userRole === "cashier") {
+        try {
+          balanceCleanup = setupBalanceRealtimeSubscription();
+        } catch (error) {
+          console.warn("Could not set up balance subscription:", error);
+        }
+      }
+
+      // Set up real-time subscription for return requests (cashiers only)
+      let requestsCleanup = () => {};
+      if (userRole === "cashier") {
+        try {
+          const requestsChannel = supabase
+            .channel(`cashier-return-requests-${user.id}`)
+            .on('postgres_changes',
+              {
+                event: '*',
+                schema: 'public',
+                table: 'money_return_requests',
+                filter: `cashier_id=eq.${user.id}`
+              },
+              () => {
+                console.log('Return request updated, refreshing...');
+                fetchReturnRequests();
+              }
+            )
+            .subscribe();
+          
+          requestsCleanup = () => {
+            try {
+              supabase.removeChannel(requestsChannel);
+            } catch (error) {
+              console.warn("Error removing requests channel:", error);
+            }
+          };
+        } catch (error) {
+          console.warn("Could not set up return requests subscription:", error);
+        }
+      }
+
+      return () => {
+        try {
+          console.log('Cleaning up dashboard subscription and polling');
+          cleanup();
+          clearInterval(pollInterval);
+          balanceCleanup();
+          requestsCleanup();
+        } catch (error) {
+          console.warn("Error during cleanup:", error);
+        }
+      };
+    } catch (error) {
+      console.error("Error setting up dashboard subscriptions:", error);
+      // Return empty cleanup function to prevent errors
+      return () => {};
+    }
   }, [user?.id, userRole]);
 
   const fetchStats = async () => {

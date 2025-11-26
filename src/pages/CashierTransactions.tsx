@@ -59,14 +59,33 @@ export default function CashierTransactions() {
     if (!user?.id) return;
     try {
       setLoading(true);
-      await Promise.all([fetchMoneyAssignments(), fetchReturnRequests()]);
-    } catch (error) {
+      // Fetch both in parallel, but handle errors individually
+      await Promise.allSettled([
+        fetchMoneyAssignments().catch(err => {
+          console.error("Error fetching money assignments:", err);
+          // Don't show toast for missing table, just log
+          if (!err.message?.includes("does not exist") && !err.message?.includes("relation") && err.code !== "42P01") {
+            throw err;
+          }
+        }),
+        fetchReturnRequests().catch(err => {
+          console.error("Error fetching return requests:", err);
+          // Don't show toast for missing table, just log
+          if (!err.message?.includes("does not exist") && !err.message?.includes("relation") && err.code !== "42P01") {
+            throw err;
+          }
+        })
+      ]);
+    } catch (error: any) {
       console.error("Error fetching transaction data:", error);
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description: "Failed to load transaction history.",
-      });
+      // Only show error if it's not a missing table error
+      if (!error?.message?.includes("does not exist") && !error?.message?.includes("relation") && error?.code !== "42P01") {
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: error?.message || "Failed to load transaction history.",
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -75,31 +94,57 @@ export default function CashierTransactions() {
   const fetchMoneyAssignments = async () => {
     if (!user?.id) return;
     try {
+      console.log("Fetching money assignments for cashier:", user.id);
+      
       // Fetch all money assignments where this cashier is the cashier_id
+      // Also try without filter first to see if RLS is blocking
       const { data: assignments, error } = await supabase
         .from("money_assignments")
         .select("*")
         .eq("cashier_id", user.id)
         .order("assigned_at", { ascending: false });
+      
+      // Removed the broader query check - it will fail if table doesn't exist
 
-      if (error) throw error;
+      if (error) {
+        // If table doesn't exist (PGRST205 is PostgREST error for missing table)
+        if (error.code === "PGRST205" || error.message?.includes("does not exist") || error.message?.includes("relation") || error.code === "42P01") {
+          console.warn("money_assignments table does not exist yet. Please run migration: 20250118000001_track_money_assignments.sql", error);
+          setMoneyAssignments([]);
+          return;
+        }
+        console.error("Error fetching money assignments:", error);
+        throw error;
+      }
 
-      // Fetch recipient names
-      const recipientIds = [...new Set(assignments?.map(a => a.recipient_id) || [])];
-      if (recipientIds.length > 0) {
-        const { data: profiles } = await supabase
+      console.log("Raw assignments from database:", assignments);
+      console.log("Number of assignments found:", assignments?.length || 0);
+
+      // Always set assignments, even if empty
+      if (assignments && assignments.length > 0) {
+        // Fetch recipient names
+        const recipientIds = [...new Set(assignments.map(a => a.recipient_id))];
+        console.log("Recipient IDs to fetch names for:", recipientIds);
+        
+        const { data: profiles, error: profilesError } = await supabase
           .from("profiles")
           .select("user_id, name")
           .in("user_id", recipientIds);
 
+        if (profilesError) {
+          console.error("Error fetching recipient profiles:", profilesError);
+        }
+
         const nameMap = new Map(profiles?.map(p => [p.user_id, p.name]) || []);
-        const assignmentsWithNames = (assignments || []).map(a => ({
+        const assignmentsWithNames = assignments.map(a => ({
           ...a,
           recipient_name: nameMap.get(a.recipient_id) || "Unknown",
           amount: Number(a.amount),
         }));
+        console.log("Assignments with names:", assignmentsWithNames);
         setMoneyAssignments(assignmentsWithNames);
       } else {
+        console.log("No assignments found, setting empty array");
         setMoneyAssignments([]);
       }
     } catch (error) {
@@ -118,7 +163,15 @@ export default function CashierTransactions() {
         .eq("cashier_id", user.id)
         .order("requested_at", { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        // If table doesn't exist (PGRST205 is PostgREST error for missing table)
+        if (error.code === "PGRST205" || error.message?.includes("does not exist") || error.message?.includes("relation") || error.code === "42P01") {
+          console.warn("money_return_requests table does not exist yet. Please run migration: 20250124000000_create_money_return_requests.sql", error);
+          setReturnRequests([]);
+          return;
+        }
+        throw error;
+      }
 
       // Fetch requester names
       const requesterIds = [...new Set(requests?.map(r => r.requester_id) || [])];

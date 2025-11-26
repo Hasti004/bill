@@ -390,45 +390,35 @@ export default function Balances() {
       
       // Record money assignment if cashier is adding money to an employee/engineer
       // This tracks the path: cashier -> employee, so money can be returned to the same cashier
+      // Always record assignments when cashier adds money - this ensures complete transaction history
       if (userRole === 'cashier' && user?.id && amountToAdd > 0) {
         // Check if recipient is an employee or engineer (not admin or cashier)
         const recipientRole = currentRow.role;
         if (recipientRole === 'employee' || recipientRole === 'engineer') {
-          // Verify cashier can manage this employee (respects zone/department assignment)
-          const cashierProfile = rows.find(r => r.user_id === user.id);
-          const cashierAssignedEngineerId = (cashierProfile as any)?.cashier_assigned_engineer_id;
+          // Always record the assignment for transaction history
+          console.log('Recording money assignment:', {
+            cashier_id: user.id,
+            recipient_id: userId,
+            amount: amountToAdd,
+            recipientRole
+          });
           
-          // Only record if:
-          // 1. Cashier has no assigned engineer (can manage all - backward compatibility)
-          // 2. OR employee is under cashier's assigned engineer
-          // 3. OR recipient is the cashier's assigned engineer
-          let shouldRecord = true;
-          if (cashierAssignedEngineerId) {
-            if (recipientRole === 'employee') {
-              const employeeEngineerId = (currentRow as any)?.reporting_engineer_id;
-              shouldRecord = employeeEngineerId === cashierAssignedEngineerId;
-            } else if (recipientRole === 'engineer') {
-              shouldRecord = userId === cashierAssignedEngineerId;
-            }
-          }
-          
-          if (shouldRecord) {
-            // Record the assignment
-            const { error: assignmentError } = await supabase
-              .from("money_assignments")
-              .insert({
-                cashier_id: user.id,
-                recipient_id: userId,
-                amount: amountToAdd,
-              });
+          const { data: insertedData, error: assignmentError } = await supabase
+            .from("money_assignments")
+            .insert({
+              cashier_id: user.id,
+              recipient_id: userId,
+              amount: amountToAdd,
+            })
+            .select();
 
-            if (assignmentError) {
-              console.error('Error recording money assignment:', assignmentError);
-              // Don't throw error - assignment recording is not critical for the transaction
-              // But log it for debugging
-            } else {
-              console.log('Money assignment recorded: cashier', user.id, '-> employee', userId, 'amount:', amountToAdd);
-            }
+          if (assignmentError) {
+            console.error('Error recording money assignment:', assignmentError);
+            // Don't throw error - assignment recording is not critical for the transaction
+            // But log it for debugging
+          } else {
+            console.log('Money assignment recorded successfully:', insertedData);
+            console.log('Money assignment recorded: cashier', user.id, '-> employee', userId, 'amount:', amountToAdd);
           }
         }
       }
