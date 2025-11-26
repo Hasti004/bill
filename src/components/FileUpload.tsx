@@ -6,9 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { Upload, X, FileText, Image, Download } from "lucide-react";
+import { Upload, X, FileText, Image, Download, Camera } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 interface Attachment {
   id: string;
@@ -41,8 +42,10 @@ export function FileUpload({
   const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const { user } = useAuth();
+  const isMobile = useIsMobile();
 
 
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -52,6 +55,15 @@ export function FileUpload({
     for (const file of Array.from(files)) {
       await uploadFile(file);
     }
+    
+    // Reset input value to allow selecting the same file again
+    if (event.target) {
+      event.target.value = '';
+    }
+  };
+
+  const handleCameraClick = () => {
+    cameraInputRef.current?.click();
   };
 
   const uploadFile = async (file: File) => {
@@ -234,37 +246,58 @@ export function FileUpload({
       <CardContent className="space-y-4">
         {/* Upload Area */}
         <div className="border-2 border-dashed border-muted-foreground/25 rounded-lg p-6 text-center">
-                <input
+          {/* Regular file input for desktop */}
+          <input
             ref={fileInputRef}
             type="file"
             multiple
-            accept=".png,.jpg,.jpeg"
+            accept="image/png,image/jpeg,image/jpg"
+            onChange={handleFileSelect}
+            className="hidden"
+          />
+          
+          {/* Camera input for mobile */}
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
             onChange={handleFileSelect}
             className="hidden"
           />
           
           <div className="space-y-2">
             <Upload className="h-8 w-8 mx-auto text-muted-foreground" />
-            <div>
+            <div className="flex flex-col sm:flex-row gap-2 justify-center items-center">
               <Button
                 variant="outline"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={uploading}
+                className="w-full sm:w-auto"
               >
+                <Upload className="h-4 w-4 mr-2" />
                 Choose Files
               </Button>
-              <p className="text-sm text-muted-foreground mt-2">
-                or drag and drop bill photos here
-              </p>
-              <p className="text-xs text-muted-foreground">
-                PNG, JPG only (max 10MB each)
-                {required && (
-                  <span className="text-red-500 font-medium"> * Required for submission</span>
-                )}
-              </p>
+              {isMobile && (
+                <Button
+                  variant="outline"
+                  onClick={handleCameraClick}
+                  disabled={uploading}
+                  className="w-full sm:w-auto bg-blue-50 hover:bg-blue-100 border-blue-300"
+                >
+                  <Camera className="h-4 w-4 mr-2" />
+                  Take Photo
+                </Button>
+              )}
             </div>
+            <p className="text-sm text-muted-foreground mt-2">
+              {isMobile ? "Take a photo or choose from files" : "or drag and drop bill photos here"}
+            </p>
             <p className="text-xs text-muted-foreground">
-              Supports: PNG, JPG image files only (max 10MB each)
+              PNG, JPG only (max 10MB each)
+              {required && (
+                <span className="text-red-500 font-medium"> * Required for submission</span>
+              )}
             </p>
           </div>
 
