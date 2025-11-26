@@ -40,7 +40,60 @@ export default function Balances() {
 
   useEffect(() => {
     fetchProfiles();
-  }, []);
+    
+    // Set up real-time balance subscription for cashiers
+    if (userRole === "cashier" && user?.id) {
+      const cleanup = setupBalanceRealtimeSubscription();
+      return cleanup;
+    }
+  }, [userRole, user?.id]);
+
+  const setupBalanceRealtimeSubscription = () => {
+    if (!user?.id) return () => {};
+
+    console.log('Setting up balance real-time subscription for cashier:', user.id);
+
+    const channel = supabase
+      .channel(`balances-cashier-${user.id}`)
+      .on('postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'profiles',
+          filter: `user_id=eq.${user.id}`
+        },
+        (payload) => {
+          console.log('✅ Balances: Cashier balance updated via realtime:', payload);
+          const newBalance = (payload.new as any)?.balance ?? 0;
+          setCashierBalance(newBalance);
+          fetchProfiles(); // Refresh all profiles to show updated balances
+        }
+      )
+      // Also listen for balance updates on employees under this cashier's engineer
+      .on('postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'profiles'
+        },
+        (payload) => {
+          // Refresh profiles when any balance changes (for employees under this cashier)
+          console.log('✅ Balances: Profile balance updated, refreshing...');
+          fetchProfiles();
+        }
+      )
+      .subscribe((status) => {
+        console.log('📡 Balances cashier subscription status:', status);
+        if (status === 'SUBSCRIBED') {
+          console.log('✅ Balances: Successfully subscribed to balance updates');
+        }
+      });
+
+    return () => {
+      console.log('Cleaning up balances cashier subscription');
+      supabase.removeChannel(channel);
+    };
+  };
 
   const fetchProfiles = async () => {
     try {

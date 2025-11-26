@@ -7,6 +7,9 @@ ALTER TABLE public.notifications REPLICA IDENTITY FULL;
 -- Also enable replication for expenses table (for EngineerReview real-time updates)
 ALTER TABLE public.expenses REPLICA IDENTITY FULL;
 
+-- Enable replication for profiles table (for real-time balance updates)
+ALTER TABLE public.profiles REPLICA IDENTITY FULL;
+
 -- Note: In Supabase Dashboard, you MUST also:
 -- 1. Go to Database > Replication
 -- 2. Enable replication for the 'notifications' table (toggle it ON)

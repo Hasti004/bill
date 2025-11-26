@@ -856,8 +856,8 @@ export default function AdminPanel() {
                 <div className="overflow-x-auto -mx-4 sm:mx-0">
                   <div className="inline-block min-w-full align-middle">
                     <Table className="min-w-full">
-                      <TableHeader>
-                        <TableRow className="border-gray-200">
+                    <TableHeader>
+                      <TableRow className="border-gray-200">
                           <TableHead className="font-semibold min-w-[140px] sm:min-w-[140px]">Employee / Title</TableHead>
                           <TableHead className="font-semibold min-w-[100px] hidden sm:table-cell">Title</TableHead>
                           <TableHead className="font-semibold min-w-[100px] hidden sm:table-cell">Destination</TableHead>
@@ -866,8 +866,8 @@ export default function AdminPanel() {
                           <TableHead className="font-semibold min-w-[100px] hidden sm:table-cell">Status</TableHead>
                           <TableHead className="font-semibold min-w-[100px] whitespace-nowrap text-right pr-2 sm:pr-4 hidden sm:table-cell">Created</TableHead>
                           <TableHead className="text-right font-semibold min-w-[120px]">Status / Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
+                      </TableRow>
+                    </TableHeader>
                     <TableBody>
                       {filteredExpenses.map((expense) => (
                       <TableRow key={expense.id}>
@@ -912,32 +912,32 @@ export default function AdminPanel() {
                             <div className="sm:hidden mb-2">
                               <StatusBadge status={expense.status as any} />
                             </div>
-                            <div className="flex justify-end">
+                          <div className="flex justify-end">
                               <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-                              <DialogTrigger asChild>
-                                <Button
+                                <DialogTrigger asChild>
+                                  <Button
                                   variant={expense.status === "approved" || expense.status === "rejected" ? "secondary" : "default"}
-                                  size="sm"
+                                    size="sm"
                                   className={expense.status === "approved" || expense.status === "rejected"
                                     ? "h-8 px-2 text-xs font-normal whitespace-nowrap"
                                     : "h-8 px-2 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white whitespace-nowrap"
                                   }
-                                  onClick={async () => {
-                                    setSelectedExpense(expense);
-                                    setDialogOpen(true);
-                                    // Fetch attachments when opening dialog
-                                    if (expense.id) {
-                                      const { data: attData } = await supabase
-                                        .from("attachments")
-                                        .select("*")
-                                        .eq("expense_id", expense.id)
-                                        .order("created_at", { ascending: false });
-                                      setAttachments(attData || []);
-                                    }
-                                  }}
-                                >
+                                    onClick={async () => {
+                                      setSelectedExpense(expense);
+                                      setDialogOpen(true);
+                                      // Fetch attachments when opening dialog
+                                      if (expense.id) {
+                                        const { data: attData } = await supabase
+                                          .from("attachments")
+                                          .select("*")
+                                          .eq("expense_id", expense.id)
+                                          .order("created_at", { ascending: false });
+                                        setAttachments(attData || []);
+                                      }
+                                    }}
+                                  >
                                   {expense.status === "approved" || expense.status === "rejected" ? "View" : "View/Approve"}
-                                </Button>
+                                  </Button>
                               </DialogTrigger>
                               <DialogContent className="max-w-[95vw] sm:max-w-2xl md:max-w-4xl max-h-[95vh] sm:max-h-[85vh] overflow-y-auto p-4 sm:p-6">
                               <DialogHeader>
@@ -1125,7 +1125,7 @@ export default function AdminPanel() {
                                 )}
                               </DialogFooter>
                               </DialogContent>
-                              </Dialog>
+                            </Dialog>
                             </div>
                           </div>
                         </TableCell>
@@ -1146,7 +1146,7 @@ export default function AdminPanel() {
               )}
             </DialogContent>
           </Dialog>
-        </div>
+                </div>
     </div>
   );
 }

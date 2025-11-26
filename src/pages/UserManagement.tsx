@@ -32,6 +32,7 @@ interface CreateUserForm {
   password: string;
   reportingEngineerId?: string | "none";
   cashierAssignedEngineerId?: string | "none";
+  assignedCashierId?: string | "none";
 }
 
 export default function UserManagement() {
@@ -41,7 +42,8 @@ export default function UserManagement() {
   const [loading, setLoading] = useState(false);
   const [listLoading, setListLoading] = useState(false);
   const [engineers, setEngineers] = useState<{ id: string; name: string; email: string }[]>([]);
-  const [users, setUsers] = useState<{ user_id: string; name: string; email: string; balance: number; role: string; assigned_engineer_name?: string; cashier_assigned_engineer_name?: string }[]>([]);
+  const [cashiers, setCashiers] = useState<{ id: string; name: string; email: string }[]>([]);
+  const [users, setUsers] = useState<{ user_id: string; name: string; email: string; balance: number; role: string; assigned_engineer_name?: string; cashier_assigned_engineer_name?: string; assigned_cashier_name?: string }[]>([]);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<{ user_id: string; name: string; email: string; balance: number; role: string } | null>(null);
   const [expensesLoading, setExpensesLoading] = useState(false);
@@ -121,10 +123,10 @@ export default function UserManagement() {
     const loadUsers = async () => {
       try {
         setListLoading(true);
-        // fetch profiles with reporting_engineer_id and cashier_assigned_engineer_id
+        // fetch profiles with reporting_engineer_id, cashier_assigned_engineer_id, and assigned_cashier_id
         const { data: profiles, error: profilesError } = await supabase
           .from("profiles")
-          .select("user_id, name, email, balance, reporting_engineer_id, cashier_assigned_engineer_id");
+          .select("user_id, name, email, balance, reporting_engineer_id, cashier_assigned_engineer_id, assigned_cashier_id");
         if (profilesError) throw profilesError;
 
         const ids = (profiles || []).map(p => p.user_id);
@@ -150,6 +152,11 @@ export default function UserManagement() {
         // Combine all engineer IDs (for employees and cashiers)
         const allEngineerIds = [...new Set([...employeeEngineerIds, ...cashierEngineerIds])];
 
+        // Get all cashier IDs (for employees assigned to cashiers)
+        const assignedCashierIds = [...new Set((profiles || [])
+          .map(p => (p as any).assigned_cashier_id)
+          .filter(id => id !== null && id !== undefined))];
+
         // Fetch engineer names
         let engineerNamesById: Record<string, string> = {};
         if (allEngineerIds.length > 0) {
@@ -160,6 +167,20 @@ export default function UserManagement() {
           if (!engineerError && engineerProfiles) {
             engineerProfiles.forEach(ep => {
               engineerNamesById[ep.user_id] = ep.name;
+            });
+          }
+        }
+
+        // Fetch cashier names
+        let cashierNamesById: Record<string, string> = {};
+        if (assignedCashierIds.length > 0) {
+          const { data: cashierProfiles, error: cashierError } = await supabase
+            .from("profiles")
+            .select("user_id, name")
+            .in("user_id", assignedCashierIds);
+          if (!cashierError && cashierProfiles) {
+            cashierProfiles.forEach(cp => {
+              cashierNamesById[cp.user_id] = cp.name;
             });
           }
         }
@@ -175,6 +196,9 @@ export default function UserManagement() {
             : undefined,
           cashier_assigned_engineer_name: (p as any).cashier_assigned_engineer_id
             ? engineerNamesById[(p as any).cashier_assigned_engineer_id] || "Unknown"
+            : undefined,
+          assigned_cashier_name: (p as any).assigned_cashier_id
+            ? cashierNamesById[(p as any).assigned_cashier_id] || "Unknown"
             : undefined,
         }));
         setUsers(combined);
@@ -373,16 +397,47 @@ export default function UserManagement() {
 
       // If creating an employee and an engineer is chosen, link them
       if (validated.role === "employee" && formData.reportingEngineerId && formData.reportingEngineerId !== "none") {
+        const updateData: any = { reporting_engineer_id: formData.reportingEngineerId };
+        
+        // If creating an employee and a cashier is chosen, link them
+        if (formData.assignedCashierId && formData.assignedCashierId !== "none") {
+          updateData.assigned_cashier_id = formData.assignedCashierId;
+        }
+        
         const { error: profileUpdateError } = await supabase
           .from("profiles")
-          .update({ reporting_engineer_id: formData.reportingEngineerId })
+          .update(updateData)
+          .eq("user_id", authData.user.id);
+
+        if (profileUpdateError) throw profileUpdateError;
+      }
+
+      // If creating an engineer and a cashier is chosen, link them
+      if (validated.role === "engineer" && formData.assignedCashierId && formData.assignedCashierId !== "none") {
+        const { error: profileUpdateError } = await supabase
+          .from("profiles")
+          .update({ assigned_cashier_id: formData.assignedCashierId })
           .eq("user_id", authData.user.id);
 
         if (profileUpdateError) throw profileUpdateError;
       }
 
       // If creating a cashier and an engineer is chosen, link them
+      // But only if the engineer doesn't already have a cashier
       if (validated.role === "cashier" && formData.cashierAssignedEngineerId && formData.cashierAssignedEngineerId !== "none") {
+        // Check if engineer already has a cashier
+        const { data: existingCashier, error: checkError } = await supabase
+          .from("profiles")
+          .select("user_id")
+          .eq("cashier_assigned_engineer_id", formData.cashierAssignedEngineerId)
+          .limit(1);
+
+        if (checkError) throw checkError;
+
+        if (existingCashier && existingCashier.length > 0) {
+          throw new Error("This engineer already has a cashier assigned. Each engineer can only have one cashier.");
+        }
+
         const { error: profileUpdateError } = await supabase
           .from("profiles")
           .update({ cashier_assigned_engineer_id: formData.cashierAssignedEngineerId })
@@ -451,7 +506,7 @@ export default function UserManagement() {
       try {
         const { data } = await supabase
           .from("profiles")
-          .select("reporting_engineer_id, cashier_assigned_engineer_id")
+          .select("reporting_engineer_id, cashier_assigned_engineer_id, assigned_cashier_id")
           .eq("user_id", u.user_id)
           .single();
         
@@ -461,6 +516,7 @@ export default function UserManagement() {
           role: u.role as "admin" | "engineer" | "employee" | "cashier",
           reportingEngineerId: (data as any)?.reporting_engineer_id || "none",
           cashierAssignedEngineerId: (data as any)?.cashier_assigned_engineer_id || "none",
+          assignedCashierId: (data as any)?.assigned_cashier_id || "none",
         });
       } catch (e) {
         setEditFormData({
@@ -469,6 +525,7 @@ export default function UserManagement() {
           role: u.role as "admin" | "engineer" | "employee" | "cashier",
           reportingEngineerId: "none",
           cashierAssignedEngineerId: "none",
+          assignedCashierId: "none",
         });
       }
     };
@@ -499,13 +556,41 @@ export default function UserManagement() {
         updateData.reporting_engineer_id = editFormData.reportingEngineerId !== "none" 
           ? editFormData.reportingEngineerId 
           : null;
-      } else {
-        // Clear if role is not employee
+        // Handle assigned_cashier_id (for employees)
+        updateData.assigned_cashier_id = editFormData.assignedCashierId !== "none"
+          ? editFormData.assignedCashierId
+          : null;
+      } else if (editFormData.role === "engineer") {
+        // Handle assigned_cashier_id (for engineers)
+        updateData.assigned_cashier_id = editFormData.assignedCashierId !== "none"
+          ? editFormData.assignedCashierId
+          : null;
+        // Clear reporting_engineer_id if role is engineer
         updateData.reporting_engineer_id = null;
+      } else {
+        // Clear if role is not employee or engineer
+        updateData.reporting_engineer_id = null;
+        updateData.assigned_cashier_id = null;
       }
       
       // Handle cashier_assigned_engineer_id (for cashiers)
       if (editFormData.role === "cashier") {
+        // Check if engineer already has a cashier (unless it's the current cashier being edited)
+        if (editFormData.cashierAssignedEngineerId !== "none") {
+          const { data: existingCashier, error: checkError } = await supabase
+            .from("profiles")
+            .select("user_id")
+            .eq("cashier_assigned_engineer_id", editFormData.cashierAssignedEngineerId)
+            .neq("user_id", userToEdit.user_id) // Exclude current cashier
+            .limit(1);
+
+          if (checkError) throw checkError;
+
+          if (existingCashier && existingCashier.length > 0) {
+            throw new Error("This engineer already has a cashier assigned. Each engineer can only have one cashier.");
+          }
+        }
+        
         updateData.cashier_assigned_engineer_id = editFormData.cashierAssignedEngineerId !== "none"
           ? editFormData.cashierAssignedEngineerId
           : null;
@@ -959,16 +1044,16 @@ export default function UserManagement() {
               <div className="max-h-[440px] overflow-y-auto min-h-[400px]">
                 <table className="min-w-full text-xs sm:text-sm">
                   <thead className="bg-slate-50 text-left sticky top-0 z-10">
-                    <tr>
+                  <tr>
                       <th className="px-2 sm:px-4 py-2 sm:py-3 font-semibold text-slate-700 bg-slate-50 min-w-[140px]">Name / Email</th>
                       <th className="px-2 sm:px-4 py-2 sm:py-3 font-semibold text-slate-700 bg-slate-50 min-w-[120px] hidden sm:table-cell">Email</th>
                       <th className="px-2 sm:px-4 py-2 sm:py-3 font-semibold text-slate-700 bg-slate-50 min-w-[100px]">Role</th>
                       <th className="px-2 sm:px-4 py-2 sm:py-3 font-semibold text-slate-700 bg-slate-50 min-w-[120px] hidden md:table-cell">Assigned Engineer</th>
                       <th className="px-2 sm:px-4 py-2 sm:py-3 font-semibold text-slate-700 bg-slate-50 min-w-[100px] hidden sm:table-cell">Balance</th>
                       <th className="px-2 sm:px-4 py-2 sm:py-3 font-semibold text-slate-700 text-right bg-slate-50 min-w-[120px]">Balance / Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                  </tr>
+                </thead>
+                <tbody>
                   {listLoading ? (
                     <tr>
                       <td className="px-4 py-4" colSpan={6}>Loading users...</td>
@@ -1028,13 +1113,13 @@ export default function UserManagement() {
                               <Button variant="outline" size="sm" onClick={() => openUserDrawer(u)} className="text-xs sm:text-sm px-2 sm:px-3">
                                 <span className="hidden sm:inline">View</span>
                                 <Eye className="h-3 w-3 sm:h-4 sm:w-4 sm:hidden" />
-                              </Button>
+                            </Button>
                               <Button variant="outline" size="sm" onClick={() => openEditDialog(u)} className="px-2 sm:px-3">
                                 <Edit className="h-3 w-3 sm:h-4 sm:w-4" />
                               </Button>
                               <Button variant="destructive" size="sm" onClick={() => openDeleteDialog(u)} className="px-2 sm:px-3">
                                 <Trash2 className="h-3 w-3 sm:h-4 sm:w-4" />
-                              </Button>
+                            </Button>
                             </div>
                           </div>
                         </td>
@@ -1042,9 +1127,9 @@ export default function UserManagement() {
                       ))
                     );
                   })()}
-                  </tbody>
-                </table>
-              </div>
+                </tbody>
+              </table>
+            </div>
             </div>
             ) : (
             <div className="p-6 min-h-[400px]">
@@ -1375,25 +1460,48 @@ export default function UserManagement() {
                   </div>
 
                    {formData.role === "employee" && (
+                  <div className="space-y-3">
+                    <Label htmlFor="reportingEngineer" className="text-sm font-medium text-gray-700">Assign Engineer (for Employee)</Label>
+                    <Select
+                      value={formData.reportingEngineerId || "none"}
+                      onValueChange={(value) => setFormData(prev => ({ ...prev, reportingEngineerId: value }))}
+                    >
+                         <SelectTrigger className="h-12 border-gray-200 focus:border-blue-500 focus:ring-blue-500/20 transition-colors duration-150">
+                        <SelectValue placeholder="Select engineer" />
+                      </SelectTrigger>
+                      <SelectContent className="border-0 shadow-xl">
+                        <SelectItem value="none">Unassigned</SelectItem>
+                        {engineers.map(e => (
+                          <SelectItem key={e.id} value={e.id}>
+                            {e.name} ({e.email})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-gray-500">If set, all expenses will auto-assign to this engineer.</p>
+                  </div>
+                   )}
+
+                   {formData.role === "employee" && (
                      <div className="space-y-3">
-                       <Label htmlFor="reportingEngineer" className="text-sm font-medium text-gray-700">Assign Engineer (for Employee)</Label>
+                       <Label htmlFor="assignedCashier" className="text-sm font-medium text-gray-700">Assign Cashier</Label>
                        <Select
-                         value={formData.reportingEngineerId || "none"}
-                         onValueChange={(value) => setFormData(prev => ({ ...prev, reportingEngineerId: value }))}
+                         value={formData.assignedCashierId || "none"}
+                         onValueChange={(value) => setFormData(prev => ({ ...prev, assignedCashierId: value }))}
                        >
                          <SelectTrigger className="h-12 border-gray-200 focus:border-blue-500 focus:ring-blue-500/20 transition-colors duration-150">
-                           <SelectValue placeholder="Select engineer" />
+                           <SelectValue placeholder="Select cashier" />
                          </SelectTrigger>
                          <SelectContent className="border-0 shadow-xl">
                            <SelectItem value="none">Unassigned</SelectItem>
-                           {engineers.map(e => (
-                             <SelectItem key={e.id} value={e.id}>
-                               {e.name} ({e.email})
+                           {cashiers.map(c => (
+                             <SelectItem key={c.id} value={c.id}>
+                               {c.name} ({c.email})
                              </SelectItem>
                            ))}
                          </SelectContent>
                        </Select>
-                       <p className="text-xs text-gray-500">If set, all expenses will auto-assign to this engineer.</p>
+                       <p className="text-xs text-gray-500">Employee will return money to this cashier.</p>
                      </div>
                    )}
 
@@ -1409,14 +1517,23 @@ export default function UserManagement() {
                          </SelectTrigger>
                          <SelectContent className="border-0 shadow-xl">
                            <SelectItem value="none">Unassigned (Can manage all)</SelectItem>
-                           {engineers.map(e => (
+                           {engineers.filter(e => {
+                             // Filter out engineers who already have a cashier assigned
+                             const engineerHasCashier = users.some(u => 
+                               u.role === "cashier" && 
+                               u.cashier_assigned_engineer_name &&
+                               // Find the engineer user by matching name
+                               users.find(eng => eng.role === "engineer" && eng.name === u.cashier_assigned_engineer_name)?.user_id === e.id
+                             );
+                             return !engineerHasCashier;
+                           }).map(e => (
                              <SelectItem key={e.id} value={e.id}>
                                {e.name} ({e.email})
                              </SelectItem>
                            ))}
                          </SelectContent>
                        </Select>
-                       <p className="text-xs text-gray-500">If set, this cashier can only manage employees under the selected engineer's zone/department.</p>
+                       <p className="text-xs text-gray-500">If set, this cashier can only manage employees under the selected engineer's zone/department. Each engineer can only have one cashier.</p>
                      </div>
                    )}
 
@@ -1799,6 +1916,50 @@ export default function UserManagement() {
                 <p className="text-xs text-muted-foreground">If set, all expenses will auto-assign to this engineer.</p>
               </div>
             )}
+            {editFormData.role === "employee" && (
+              <div className="space-y-2">
+                <Label htmlFor="edit-cashier">Assign Cashier</Label>
+                <Select
+                  value={editFormData.assignedCashierId}
+                  onValueChange={(value) => setEditFormData(prev => ({ ...prev, assignedCashierId: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select cashier" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Unassigned</SelectItem>
+                    {cashiers.map(c => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name} ({c.email})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">Employee will return money to this cashier.</p>
+              </div>
+            )}
+            {editFormData.role === "engineer" && (
+              <div className="space-y-2">
+                <Label htmlFor="edit-engineer-cashier">Assign Cashier</Label>
+                <Select
+                  value={editFormData.assignedCashierId}
+                  onValueChange={(value) => setEditFormData(prev => ({ ...prev, assignedCashierId: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select cashier" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Unassigned</SelectItem>
+                    {cashiers.map(c => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name} ({c.email})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">Engineer will return money to this cashier.</p>
+              </div>
+            )}
             {editFormData.role === "cashier" && (
               <div className="space-y-2">
                 <Label htmlFor="edit-cashier-engineer">Assign Engineer (Zone/Department)</Label>
@@ -1811,14 +1972,24 @@ export default function UserManagement() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Unassigned (Can manage all)</SelectItem>
-                    {engineers.map(e => (
+                    {engineers.filter(e => {
+                      // Filter out engineers who already have a cashier (unless editing the current cashier)
+                      const engineerHasCashier = users.some(u => 
+                        u.role === "cashier" && 
+                        u.user_id !== userToEdit?.user_id && // Exclude current cashier being edited
+                        u.cashier_assigned_engineer_name &&
+                        // Find the engineer user by matching name
+                        users.find(eng => eng.role === "engineer" && eng.name === u.cashier_assigned_engineer_name)?.user_id === e.id
+                      );
+                      return !engineerHasCashier;
+                    }).map(e => (
                       <SelectItem key={e.id} value={e.id}>
                         {e.name} ({e.email})
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-muted-foreground">If set, this cashier can only manage employees under the selected engineer's zone/department.</p>
+                <p className="text-xs text-muted-foreground">If set, this cashier can only manage employees under the selected engineer's zone/department. Each engineer can only have one cashier.</p>
               </div>
             )}
           </div>

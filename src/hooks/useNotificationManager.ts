@@ -51,7 +51,7 @@ export function useNotificationManager() {
     if (!user?.id) return;
 
     console.log('🔄 Initializing notification subscription...');
-    const cleanup = setupRealtimeSubscription();
+      const cleanup = setupRealtimeSubscription();
     
     // Also set up a polling fallback in case realtime doesn't work
     // This will check for new notifications every 10 seconds as a backup

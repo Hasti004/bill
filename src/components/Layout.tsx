@@ -57,8 +57,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    if (user && (userRole === 'employee' || userRole === 'cashier')) {
+    if (user && (userRole === 'employee' || userRole === 'engineer' || userRole === 'cashier')) {
       fetchUserBalance();
+      
+      // Set up real-time balance subscription
+      const cleanup = setupBalanceRealtimeSubscription();
+      return cleanup;
     }
   }, [user, userRole]);
 
@@ -77,6 +81,39 @@ export function Layout({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const setupBalanceRealtimeSubscription = () => {
+    if (!user?.id) return () => {};
+
+    console.log('Setting up balance real-time subscription in Layout for user:', user.id);
+
+    const channel = supabase
+      .channel(`layout-balance-${user.id}`)
+      .on('postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'profiles',
+          filter: `user_id=eq.${user.id}`
+        },
+        (payload) => {
+          console.log('✅ Layout: Balance updated via realtime:', payload);
+          const newBalance = (payload.new as any)?.balance ?? 0;
+          setUserBalance(newBalance);
+        }
+      )
+      .subscribe((status) => {
+        console.log('📡 Layout balance subscription status:', status);
+        if (status === 'SUBSCRIBED') {
+          console.log('✅ Layout: Successfully subscribed to balance updates');
+        }
+      });
+
+    return () => {
+      console.log('Cleaning up layout balance subscription');
+      supabase.removeChannel(channel);
+    };
+  };
+
   return (
     <SidebarProvider>
       <div className="min-h-screen flex w-full bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100">
@@ -92,30 +129,32 @@ export function Layout({ children }: { children: React.ReactNode }) {
                   alt="Hero" 
                   className="h-6 sm:h-8 w-auto hidden sm:block"
                 />
-                <div className="flex-1 min-w-0">
-                  <h1 className="text-sm sm:text-base font-semibold text-gray-900 truncate">
-                    Expense Management
-                  </h1>
-                  <p className="text-xs text-gray-500 hidden sm:block">
+              <div className="flex-1 min-w-0">
+                <h1 className="text-sm sm:text-base font-semibold text-gray-900 truncate">
+                  Expense Management
+                </h1>
+                <p className="text-xs text-gray-500 hidden sm:block">
                     Bikes Auto - Hero MotoCorp
-                  </p>
+                </p>
                 </div>
               </div>
               
               {/* User Profile Section */}
               <div className="flex items-center gap-3">
-                {/* Balance indicator for employees and cashiers */}
-                {(userRole === 'employee' || userRole === 'cashier') && userBalance !== null && (
+                {/* Balance indicator for employees, engineers, and cashiers */}
+                {(userRole === 'employee' || userRole === 'engineer' || userRole === 'cashier') && userBalance !== null && (
                   <div className={`hidden md:flex items-center gap-2 px-3 py-1 border rounded-lg ${
                     userRole === 'cashier' 
                       ? 'bg-purple-50 border-purple-200' 
+                      : userRole === 'engineer'
+                      ? 'bg-blue-50 border-blue-200'
                       : 'bg-green-50 border-green-200'
                   }`}>
                     <Wallet className={`h-4 w-4 ${
-                      userRole === 'cashier' ? 'text-purple-600' : 'text-green-600'
+                      userRole === 'cashier' ? 'text-purple-600' : userRole === 'engineer' ? 'text-blue-600' : 'text-green-600'
                     }`} />
                     <span className={`text-sm font-medium ${
-                      userRole === 'cashier' ? 'text-purple-700' : 'text-green-700'
+                      userRole === 'cashier' ? 'text-purple-700' : userRole === 'engineer' ? 'text-blue-700' : 'text-green-700'
                     }`}>
                       <span className={userBalance < 0 ? 'text-red-600' : ''}>
                         {formatINR(userBalance)}

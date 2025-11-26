@@ -624,8 +624,8 @@ export default function Expenses() {
               <div className="overflow-x-auto -mx-4 sm:mx-0">
                 <div className="inline-block min-w-full align-middle">
                   <Table className="min-w-full">
-                    <TableHeader>
-                      <TableRow>
+                  <TableHeader>
+                    <TableRow>
                         <TableHead className="min-w-[140px] sm:min-w-[140px]">Title / Destination</TableHead>
                         <TableHead className="min-w-[100px] hidden sm:table-cell">Destination</TableHead>
                         <TableHead className="min-w-[100px] hidden sm:table-cell">Date</TableHead>
@@ -633,8 +633,8 @@ export default function Expenses() {
                         <TableHead className="min-w-[100px] hidden sm:table-cell">Status</TableHead>
                         <TableHead className="min-w-[100px] hidden sm:table-cell">Created</TableHead>
                         <TableHead className="text-right min-w-[120px]">Status / Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
+                    </TableRow>
+                  </TableHeader>
                 <TableBody>
                   {filteredExpenses.map((expense) => (
                   <TableRow key={expense.id}>
@@ -664,8 +664,8 @@ export default function Expenses() {
                         <div className="sm:hidden">
                           <StatusBadge status={expense.status as any} />
                         </div>
-                        <div className="flex justify-end">
-                          <DropdownMenu>
+                      <div className="flex justify-end">
+                        <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
                               <MoreVertical className="h-4 w-4" />

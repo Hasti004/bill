@@ -224,7 +224,7 @@ export default function EngineerReview() {
       });
 
       setAllExpenses(merged);
-
+      
       // Apply search filter
       applyFilters(merged);
     } catch (error) {
@@ -689,8 +689,8 @@ export default function EngineerReview() {
             <div className="overflow-x-auto -mx-4 sm:mx-0">
               <div className="inline-block min-w-full align-middle">
                 <Table className="min-w-full">
-                  <TableHeader>
-                    <TableRow>
+                <TableHeader>
+                  <TableRow>
                       <TableHead className="min-w-[140px] sm:min-w-[140px]">Employee / Title</TableHead>
                       <TableHead className="min-w-[100px] hidden sm:table-cell">Title</TableHead>
                       <TableHead className="min-w-[100px] hidden sm:table-cell">Destination</TableHead>
@@ -698,8 +698,8 @@ export default function EngineerReview() {
                       <TableHead className="min-w-[100px] hidden sm:table-cell">Status</TableHead>
                       <TableHead className="min-w-[100px] whitespace-nowrap text-right pr-2 sm:pr-4 hidden sm:table-cell">Created</TableHead>
                       <TableHead className="min-w-[120px] text-right">Status / Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
+                  </TableRow>
+                </TableHeader>
               <TableBody>
                 {expenses.map((expense) => (
                   <TableRow key={expense.id}>
@@ -730,26 +730,26 @@ export default function EngineerReview() {
                         <div className="sm:hidden mb-2">
                           <StatusBadge status={expense.status as any} />
                         </div>
-                        <div className="flex justify-end">
-                        <Dialog>
-                          <DialogTrigger asChild>
-                            <Button
+                      <div className="flex justify-end">
+                          <Dialog>
+                            <DialogTrigger asChild>
+                              <Button
                               variant={expense.status === "approved" || expense.status === "rejected" ? "secondary" : "default"}
-                              size="sm"
+                                size="sm"
                               className={expense.status === "approved" || expense.status === "rejected" 
                                 ? "h-8 px-2 text-xs font-normal whitespace-nowrap"
                                 : "h-8 px-2 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white whitespace-nowrap"
                               }
-                              onClick={async () => {
-                                setSelectedExpense(expense);
-                                fetchExpenseDetails(expense.id);
-                                // Refresh the approval limit to get the latest value from admin settings
-                                await fetchEngineerApprovalLimit();
-                              }}
-                            >
+                                onClick={async () => {
+                                  setSelectedExpense(expense);
+                                  fetchExpenseDetails(expense.id);
+                                  // Refresh the approval limit to get the latest value from admin settings
+                                  await fetchEngineerApprovalLimit();
+                                }}
+                              >
                               {expense.status === "approved" || expense.status === "rejected" ? "View" : "View/Approve"}
-                            </Button>
-                          </DialogTrigger>
+                              </Button>
+                            </DialogTrigger>
                         <DialogContent className="max-w-[95vw] sm:max-w-4xl max-h-[95vh] sm:max-h-[90vh] overflow-y-auto p-4 sm:p-6">
                           <DialogHeader>
                             <DialogTitle className="text-lg sm:text-xl">Expense Review</DialogTitle>
