@@ -424,12 +424,26 @@ export default function ExpenseDetail() {
                   <div className="space-y-2">
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <User className="h-4 w-4" />
-                      Assigned Engineer
+                      Assigned Manager
                     </div>
                     <p className="font-medium">{expense.assigned_engineer_name}</p>
                   </div>
                 )}
               </div>
+
+              {(expense as any).transaction_number && (
+                <>
+                  <Separator />
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <FileText className="h-4 w-4" />
+                      Transaction Number
+                    </div>
+                    <p className="text-lg font-mono font-bold text-blue-600">{(expense as any).transaction_number}</p>
+                    <p className="text-xs text-muted-foreground">Use this number to track the expense in Tally</p>
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
 

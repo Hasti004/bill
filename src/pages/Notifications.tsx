@@ -158,7 +158,7 @@ export default function Notifications() {
     if (action.includes("approved")) return "Your expense has been approved";
     if (action.includes("rejected")) return "Your expense has been rejected";
     if (action.includes("assigned")) return "An expense has been assigned to you for review";
-    if (action.includes("verified")) return "Your expense has been verified by an engineer";
+    if (action.includes("verified")) return "Your expense has been verified by a manager";
     return "Your expense status has been updated";
   };
 

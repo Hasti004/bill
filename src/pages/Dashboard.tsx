@@ -134,8 +134,8 @@ export default function Dashboard() {
 
       if (profileError) throw profileError;
 
-      // For engineers, fetch expenses assigned to them that need review
-      // Using the same logic as EngineerReview page - only count "submitted" status for pending reviews
+      // For managers, fetch expenses assigned to them that need review
+      // Using the same logic as ManagerReview page - only count "submitted" status for pending reviews
       let pendingReviews = 0;
       let pendingReviewsAmount = 0;
       
@@ -149,7 +149,7 @@ export default function Dashboard() {
         if (assignedError) {
           console.error("Error fetching assigned expenses:", assignedError);
         } else {
-          // Filter to only count "submitted" expenses (same as EngineerReview page)
+          // Filter to only count "submitted" expenses (same as ManagerReview page)
           const pendingExpenses = assignedExpenses?.filter(e => e.status === "submitted") || [];
           pendingReviews = pendingExpenses.length;
           pendingReviewsAmount = pendingExpenses.reduce(
@@ -713,10 +713,10 @@ export default function Dashboard() {
     ...(userRole === "admin" && stats.totalEngineerBalance !== undefined
       ? [
           {
-            title: "Total Engineer Balance",
+            title: "Total Manager Balance",
             value: formatINR(stats.totalEngineerBalance),
             icon: Wallet,
-            description: "All engineers",
+            description: "All managers",
             highlight: true,
           },
         ]
@@ -756,83 +756,85 @@ export default function Dashboard() {
   return (
     <div className="space-y-4 sm:space-y-6 lg:space-y-8">
       {/* Mobile-optimized Header */}
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
+      <div className="flex flex-col gap-3 sm:gap-4">
         <div className="min-w-0">
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Dashboard</h1>
-          <p className="text-sm sm:text-base text-muted-foreground">
+          <h1 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold tracking-tight whitespace-nowrap">Dashboard</h1>
+          <p className="text-xs sm:text-sm md:text-base text-muted-foreground whitespace-nowrap mt-1">
             Welcome back! Here's an overview of your expenses.
           </p>
         </div>
-        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-          {(userRole === "employee" || userRole === "admin" || userRole === "engineer") && (
-            <>
-            <Button 
-              onClick={() => navigate("/expenses/new")}
-              className="w-full sm:w-auto"
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              Add Expense
-              </Button>
-              {(userRole === "employee" || userRole === "engineer") && (
-                <Button 
-                  onClick={() => setReturnMoneyDialogOpen(true)}
-                  className="w-full sm:w-auto"
-                  variant="outline"
-                >
-                  <ArrowLeft className="mr-2 h-4 w-4" />
-                  Return Money
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap gap-2">
+            {(userRole === "employee" || userRole === "admin" || userRole === "engineer") && (
+              <>
+              <Button 
+                onClick={() => navigate("/expenses/new")}
+                className="whitespace-nowrap"
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                Add Expense
                 </Button>
-              )}
-            </>
-          )}
-          {userRole === "admin" && (
-            <Button 
-              onClick={() => {
-                navigate("/admin/users");
-                setTimeout(() => {
-                  const element = document.getElementById('create-user-section');
-                  if (element) {
-                    element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                  }
-                }, 100);
-              }}
-              className="w-full sm:w-auto"
-              variant="outline"
-            >
-              <UserPlus className="mr-2 h-4 w-4" />
-              Create User
-            </Button>
-          )}
-          {userRole === "engineer" && (
-            <Button 
-              onClick={() => navigate("/review")}
-              className="w-full sm:w-auto"
-              variant="outline"
-            >
-              <CheckCircle className="mr-2 h-4 w-4" />
-              Approve Expense
-            </Button>
-          )}
-          {(userRole === "admin" || userRole === "cashier") && (
-            <Button 
-              onClick={() => navigate("/balances")}
-              className="w-full sm:w-auto"
-              variant="outline"
-            >
-              <Wallet className="mr-2 h-4 w-4" />
-              Add Balance
-            </Button>
-          )}
+                {(userRole === "employee" || userRole === "engineer") && (
+                  <Button 
+                    onClick={() => setReturnMoneyDialogOpen(true)}
+                    className="whitespace-nowrap"
+                    variant="outline"
+                  >
+                    <ArrowLeft className="mr-2 h-4 w-4" />
+                    Return Money
+                  </Button>
+                )}
+              </>
+            )}
+            {userRole === "admin" && (
+              <Button 
+                onClick={() => {
+                  navigate("/admin/users");
+                  setTimeout(() => {
+                    const element = document.getElementById('create-user-section');
+                    if (element) {
+                      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                  }, 100);
+                }}
+                className="whitespace-nowrap"
+                variant="outline"
+              >
+                <UserPlus className="mr-2 h-4 w-4" />
+                Create User
+              </Button>
+            )}
+            {userRole === "engineer" && (
+              <Button 
+                onClick={() => navigate("/review")}
+                className="whitespace-nowrap"
+                variant="outline"
+              >
+                <CheckCircle className="mr-2 h-4 w-4" />
+                Approve Expense
+              </Button>
+            )}
+            {(userRole === "admin" || userRole === "cashier") && (
+              <Button 
+                onClick={() => navigate("/balances")}
+                className="whitespace-nowrap"
+                variant="outline"
+              >
+                <Wallet className="mr-2 h-4 w-4" />
+                Add Balance
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Mobile-optimized Stats Grid */}
-      <div className="grid gap-3 sm:gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-3 sm:gap-4 md:gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {statCards.map((card) => {
           const Icon = card.icon;
           const isPendingReviews = card.title === "Pending Reviews";
           const isPendingApprovals = card.title === "Pending Approvals";
-          const isTotalBalance = card.title === "Total Employee Balance" || card.title === "Total Engineer Balance" || card.title === "Total Cashier Balance";
+          const isTotalBalance = card.title === "Total Employee Balance" || card.title === "Total Manager Balance" || card.title === "Total Cashier Balance";
           return (
             <Card 
               key={card.title} 
@@ -849,8 +851,8 @@ export default function Dashboard() {
               }`}
               onClick={card.onClick}
             >
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-4 sm:px-6 pt-4 sm:pt-6 gap-2">
-                <CardTitle className={`text-xs sm:text-sm font-medium truncate flex-1 min-w-0 ${
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-3 sm:px-4 md:px-6 pt-3 sm:pt-4 md:pt-6 gap-2">
+                <CardTitle className={`text-xs sm:text-sm md:text-base font-medium truncate flex-1 min-w-0 ${
                   card.highlight 
                     ? isPendingReviews || isPendingApprovals ? 'text-blue-700' : 'text-green-700'
                     : ''
@@ -858,7 +860,7 @@ export default function Dashboard() {
                   {card.title}
                 </CardTitle>
                 <Icon 
-                  className={`h-4 w-4 flex-shrink-0 ml-1 ${
+                  className={`h-4 w-4 sm:h-5 sm:w-5 flex-shrink-0 ml-1 ${
                     card.highlight 
                       ? isPendingReviews || isPendingApprovals ? 'text-blue-600' : 'text-green-600'
                       : 'text-muted-foreground'
@@ -871,38 +873,38 @@ export default function Dashboard() {
                   }}
                 />
               </CardHeader>
-              <CardContent className="px-4 sm:px-6 pb-4 sm:pb-6 overflow-hidden">
+              <CardContent className="px-3 sm:px-4 md:px-6 pb-3 sm:pb-4 md:pb-6">
                 {isTotalBalance ? (
-                  <div className="flex items-center gap-3">
-                    <div className={`p-2 rounded-lg ${
+                  <div className="flex items-center gap-2 sm:gap-3">
+                    <div className={`p-1.5 sm:p-2 rounded-lg flex-shrink-0 ${
                       card.title === "Total Employee Balance" 
                         ? 'bg-green-100' 
-                        : card.title === "Total Engineer Balance"
+                        : card.title === "Total Manager Balance"
                         ? 'bg-blue-100'
                         : 'bg-purple-100'
                     }`}>
-                      <Icon className={`h-5 w-5 ${
+                      <Icon className={`h-4 w-4 sm:h-5 sm:w-5 ${
                         card.title === "Total Employee Balance" 
                           ? 'text-green-600' 
-                          : card.title === "Total Engineer Balance"
+                          : card.title === "Total Manager Balance"
                           ? 'text-blue-600'
                           : 'text-purple-600'
                       }`} />
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <div className={`text-xl sm:text-2xl font-bold whitespace-nowrap overflow-hidden text-ellipsis ${
+                    <div className="flex-1 min-w-0 overflow-hidden">
+                      <div className={`text-base sm:text-lg md:text-xl lg:text-2xl font-bold whitespace-nowrap overflow-hidden text-ellipsis ${
                         card.title === "Total Employee Balance" 
                           ? 'text-green-700' 
-                          : card.title === "Total Engineer Balance"
+                          : card.title === "Total Manager Balance"
                           ? 'text-blue-700'
                           : 'text-purple-700'
                       }`}>
                         {card.value}
                       </div>
-                      <p className={`text-xs mt-1 truncate ${
+                      <p className={`text-xs sm:text-sm mt-1 truncate ${
                         card.title === "Total Employee Balance" 
                           ? 'text-green-600' 
-                          : card.title === "Total Engineer Balance"
+                          : card.title === "Total Manager Balance"
                           ? 'text-blue-600'
                           : 'text-purple-600'
                       }`}>
@@ -912,7 +914,7 @@ export default function Dashboard() {
                   </div>
                 ) : (
                   <>
-                <div className={`text-xl sm:text-2xl font-bold whitespace-nowrap overflow-hidden text-ellipsis ${
+                <div className={`text-base sm:text-lg md:text-xl lg:text-2xl font-bold whitespace-nowrap overflow-hidden text-ellipsis ${
                   card.highlight 
                     ? isPendingReviews || isPendingApprovals ? 'text-blue-800' : 'text-green-800'
                     : card.title === "Current Balance" && typeof card.value === 'string' && card.value.includes('-')
@@ -921,7 +923,7 @@ export default function Dashboard() {
                 }`}>
                   {card.value}
                 </div>
-                <p className={`text-xs mt-1 truncate ${
+                <p className={`text-xs sm:text-sm mt-1 truncate ${
                   card.highlight 
                     ? isPendingReviews || isPendingApprovals ? 'text-blue-600' : 'text-green-600'
                     : 'text-muted-foreground'
@@ -938,20 +940,20 @@ export default function Dashboard() {
 
       {/* Live Notifications Section */}
       <Card>
-        <CardHeader className="px-4 sm:px-6 pt-4 sm:pt-6">
-          <CardTitle className="text-lg sm:text-xl flex items-center gap-2">
-            <Bell className="h-5 w-5" />
+        <CardHeader className="px-3 sm:px-4 md:px-6 pt-3 sm:pt-4 md:pt-6">
+          <CardTitle className="text-base sm:text-lg md:text-xl flex items-center gap-2 whitespace-nowrap">
+            <Bell className="h-4 w-4 sm:h-5 sm:w-5 flex-shrink-0" />
             Live Notifications
           </CardTitle>
-          <CardDescription className="text-sm">Your most recent notifications</CardDescription>
+          <CardDescription className="text-xs sm:text-sm whitespace-nowrap">Your most recent notifications</CardDescription>
         </CardHeader>
-        <CardContent className="px-4 sm:px-6 pb-4 sm:pb-6">
+        <CardContent className="px-3 sm:px-4 md:px-6 pb-3 sm:pb-4 md:pb-6">
           {notifications.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-4">
+            <p className="text-xs sm:text-sm text-muted-foreground text-center py-4 whitespace-nowrap">
               No notifications yet. You'll see your latest notifications here.
             </p>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-2 sm:space-y-3">
               {notifications.map((notification) => (
                 <Card
                   key={notification.id}
@@ -962,16 +964,16 @@ export default function Dashboard() {
                   )}
                   onClick={() => handleNotificationClick(notification)}
                 >
-                  <CardContent className="p-4">
-                    <div className="flex items-start gap-3">
+                  <CardContent className="p-3 sm:p-4">
+                    <div className="flex items-start gap-2 sm:gap-3">
                       <div className="flex-shrink-0 mt-0.5">
                         {getNotificationIcon(notification.type)}
                       </div>
-                      <div className="flex-1 min-w-0">
+                      <div className="flex-1 min-w-0 overflow-hidden">
                         <div className="flex items-start justify-between gap-2">
-                          <div className="flex-1 min-w-0">
+                          <div className="flex-1 min-w-0 overflow-hidden">
                             <div className="flex items-center gap-2 mb-1">
-                              <h4 className="font-semibold text-sm text-gray-900 truncate">
+                              <h4 className="font-semibold text-xs sm:text-sm text-gray-900 truncate">
                                 {notification.title}
                               </h4>
                               {!notification.read && (
@@ -981,7 +983,7 @@ export default function Dashboard() {
                             <p className="text-xs text-gray-600 line-clamp-2">
                               {notification.message}
                             </p>
-                            <p className="text-xs text-gray-400 mt-2">
+                            <p className="text-xs text-gray-400 mt-1 sm:mt-2 whitespace-nowrap">
                               {format(new Date(notification.created_at), "MMM d, h:mm a")}
                             </p>
                           </div>

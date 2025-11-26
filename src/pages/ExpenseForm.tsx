@@ -42,7 +42,7 @@ const expenseSchema = z.object({
 // Line items schema removed
 
 export default function ExpenseForm() {
-  const { user } = useAuth();
+  const { user, userRole } = useAuth();
   const { id } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -335,7 +335,9 @@ export default function ExpenseForm() {
 
       toast({
         title: "Success",
-        description: "Expense submitted successfully",
+        description: userRole === "admin" 
+          ? "Expense created and auto-approved. Amount deducted from your balance." 
+          : "Expense submitted successfully",
       });
 
       navigate("/expenses");

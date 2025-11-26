@@ -380,7 +380,7 @@ export default function Reports() {
           <Card>
             <CardHeader>
               <CardTitle>CLAIM VERIFICATION LIST</CardTitle>
-              <CardDescription>Expenses verified by engineers, pending admin approval</CardDescription>
+              <CardDescription>Expenses verified by managers, pending admin approval</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
@@ -415,7 +415,7 @@ export default function Reports() {
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>Engineer Approval Status</Label>
+                    <Label>Manager Approval Status</Label>
                     <Select value={engineerStatus} onValueChange={setEngineerStatus}>
                       <SelectTrigger>
                         <SelectValue />
@@ -441,7 +441,7 @@ export default function Reports() {
                       <th className="px-4 py-3 text-left font-semibold text-slate-700">LPO Number</th>
                       <th className="px-4 py-3 text-left font-semibold text-slate-700">Bill Date (DD-MM-YYYY)</th>
                       <th className="px-4 py-3 text-right font-semibold text-slate-700">Bill Amount</th>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-700">Engineer Approval</th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">Manager Approval</th>
                       <th className="px-4 py-3 text-left font-semibold text-slate-700">HO Approval</th>
                       <th className="px-4 py-3 text-left font-semibold text-slate-700">Submitted On (DD-MM-YYYY)</th>
                       <th className="px-4 py-3 text-center font-semibold text-slate-700">Actions</th>
@@ -531,7 +531,7 @@ export default function Reports() {
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>Engineer Approval Status</Label>
+                    <Label>Manager Approval Status</Label>
                     <Select value={engineerStatus} onValueChange={setEngineerStatus}>
                       <SelectTrigger>
                         <SelectValue />
@@ -568,7 +568,7 @@ export default function Reports() {
                       <th className="px-4 py-3 text-left font-semibold text-slate-700">LPO Number</th>
                       <th className="px-4 py-3 text-left font-semibold text-slate-700">Bill Date (DD-MM-YYYY)</th>
                       <th className="px-4 py-3 text-right font-semibold text-slate-700">Bill Amount</th>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-700">Engineer Approval</th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">Manager Approval</th>
                       <th className="px-4 py-3 text-left font-semibold text-slate-700">HO Approval</th>
                       <th className="px-4 py-3 text-left font-semibold text-slate-700">Submitted On (DD-MM-YYYY)</th>
                       <th className="px-4 py-3 text-center font-semibold text-slate-700">Actions</th>

@@ -8,12 +8,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { UserPlus, Mail, User, Shield, Settings, Sparkles, CheckCircle, AlertCircle, Edit, Trash2, Eye, EyeOff, Search, Lock, Copy, Check, Table2, Network } from "lucide-react";
+import { UserPlus, Mail, User, Shield, Settings, Sparkles, CheckCircle, AlertCircle, Edit, Trash2, Eye, EyeOff, Search, Lock, Copy, Check, Table2, Network, MapPin } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { z } from "zod";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { formatINR } from "@/lib/format";
@@ -33,6 +34,7 @@ interface CreateUserForm {
   reportingEngineerId?: string | "none";
   cashierAssignedEngineerId?: string | "none";
   assignedCashierId?: string | "none";
+  locationIds?: string[];
 }
 
 export default function UserManagement() {
@@ -43,7 +45,9 @@ export default function UserManagement() {
   const [listLoading, setListLoading] = useState(false);
   const [engineers, setEngineers] = useState<{ id: string; name: string; email: string }[]>([]);
   const [cashiers, setCashiers] = useState<{ id: string; name: string; email: string }[]>([]);
-  const [users, setUsers] = useState<{ user_id: string; name: string; email: string; balance: number; role: string; assigned_engineer_name?: string; cashier_assigned_engineer_name?: string; assigned_cashier_name?: string }[]>([]);
+  const [users, setUsers] = useState<{ user_id: string; name: string; email: string; balance: number; role: string; assigned_engineer_name?: string; cashier_assigned_engineer_name?: string; assigned_cashier_name?: string; cashier_assigned_engineer_id?: string; reporting_engineer_id?: string }[]>([]);
+  const [locations, setLocations] = useState<{ id: string; name: string }[]>([]);
+  const [engineerLocations, setEngineerLocations] = useState<Record<string, string[]>>({}); // engineer_id -> location_ids[]
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<{ user_id: string; name: string; email: string; balance: number; role: string } | null>(null);
   const [expensesLoading, setExpensesLoading] = useState(false);
@@ -57,17 +61,20 @@ export default function UserManagement() {
     password: "",
     reportingEngineerId: "none",
     cashierAssignedEngineerId: "none",
+    locationIds: [],
   });
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [userToEdit, setUserToEdit] = useState<{ user_id: string; name: string; email: string; balance: number; role: string } | null>(null);
   const [userToDelete, setUserToDelete] = useState<{ user_id: string; name: string; email: string } | null>(null);
-  const [editFormData, setEditFormData] = useState<{ name: string; email: string; role: "admin" | "engineer" | "employee" | "cashier"; reportingEngineerId: string; cashierAssignedEngineerId: string }>({
+  const [editFormData, setEditFormData] = useState<{ name: string; email: string; role: "admin" | "engineer" | "employee" | "cashier"; reportingEngineerId: string; cashierAssignedEngineerId: string; assignedCashierId: string; locationIds: string[] }>({
     name: "",
     email: "",
     role: "employee",
     reportingEngineerId: "none",
     cashierAssignedEngineerId: "none",
+    assignedCashierId: "none",
+    locationIds: [],
   });
   const [updating, setUpdating] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -119,6 +126,44 @@ export default function UserManagement() {
     };
 
     loadEngineers();
+    
+    // Load locations
+    const loadLocations = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("locations")
+          .select("id, name")
+          .order("name", { ascending: true });
+        if (error) throw error;
+        setLocations(data || []);
+      } catch (e) {
+        console.error("Error loading locations:", e);
+      }
+    };
+    loadLocations();
+    
+    // Load engineer-location assignments
+    const loadEngineerLocations = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("engineer_locations")
+          .select("engineer_id, location_id");
+        if (error) throw error;
+        
+        const assignments: Record<string, string[]> = {};
+        (data || []).forEach((el: any) => {
+          if (!assignments[el.engineer_id]) {
+            assignments[el.engineer_id] = [];
+          }
+          assignments[el.engineer_id].push(el.location_id);
+        });
+        setEngineerLocations(assignments);
+      } catch (e) {
+        console.error("Error loading engineer locations:", e);
+      }
+    };
+    loadEngineerLocations();
+    
     // Load users for admin list
     const loadUsers = async () => {
       try {
@@ -200,6 +245,8 @@ export default function UserManagement() {
           assigned_cashier_name: (p as any).assigned_cashier_id
             ? cashierNamesById[(p as any).assigned_cashier_id] || "Unknown"
             : undefined,
+          cashier_assigned_engineer_id: (p as any).cashier_assigned_engineer_id || undefined,
+          reporting_engineer_id: (p as any).reporting_engineer_id || undefined,
         }));
         setUsers(combined);
       } catch (e) {
@@ -222,13 +269,42 @@ export default function UserManagement() {
       engineerNameToId[e.name] = e.user_id;
     });
     
-    // Build hierarchy: Engineer -> Cashier -> Employee
-    const hierarchy = engineerUsers.map(engineer => {
-      // Get cashiers assigned to this engineer (match by name)
-      const cashiers = users.filter(u => 
+    // Build a map of engineer user_id to engineer name for reverse lookup
+    const engineerIdToName: Record<string, string> = {};
+    engineerUsers.forEach(e => {
+      engineerIdToName[e.user_id] = e.name;
+    });
+    
+    // Build hierarchy: Location -> Engineer -> Cashier -> Employee
+    // First, group engineers by location
+    const locationHierarchy: Record<string, Array<{
+      engineer: typeof engineerUsers[0] & { cashierCount: number; employeeCount: number };
+      cashiers: typeof users;
+      employees: typeof users;
+    }>> = {};
+    
+    // Engineers without locations
+    const unassignedEngineers: Array<{
+      engineer: typeof engineerUsers[0] & { cashierCount: number; employeeCount: number };
+      cashiers: typeof users;
+      employees: typeof users;
+    }> = [];
+    
+    engineerUsers.forEach(engineer => {
+      // Get locations for this engineer
+      const engineerLocationIds = engineerLocations[engineer.user_id] || [];
+      
+      // Get cashiers assigned to this engineer (match by engineer user_id for accuracy)
+      // Ensure only one cashier per engineer - enforce the one-to-one relationship
+      const allCashiers = users.filter(u => 
         u.role === "cashier" && 
-        u.cashier_assigned_engineer_name === engineer.name
+        (u.cashier_assigned_engineer_id === engineer.user_id || 
+         (u.cashier_assigned_engineer_id === undefined && u.cashier_assigned_engineer_name === engineer.name))
       );
+      // Deduplicate by user_id and take only the first one (enforce one cashier per engineer)
+      const cashiers = allCashiers.filter((cashier, index, self) => 
+        index === self.findIndex(c => c.user_id === cashier.user_id)
+      ).slice(0, 1); // Only take the first cashier - one cashier per manager
       
       // Get employees assigned to this engineer (match by name)
       const employees = users.filter(u => 
@@ -236,7 +312,7 @@ export default function UserManagement() {
         u.assigned_engineer_name === engineer.name
       );
       
-      return {
+      const engineerData = {
         engineer: {
           ...engineer,
           cashierCount: cashiers.length,
@@ -245,7 +321,26 @@ export default function UserManagement() {
         cashiers: cashiers,
         employees: employees,
       };
+      
+      if (engineerLocationIds.length === 0) {
+        // Engineer has no locations assigned
+        unassignedEngineers.push(engineerData);
+      } else {
+        // Add engineer to each of their locations
+        engineerLocationIds.forEach(locationId => {
+          if (!locationHierarchy[locationId]) {
+            locationHierarchy[locationId] = [];
+          }
+          locationHierarchy[locationId].push(engineerData);
+        });
+      }
     });
+    
+    // Convert location hierarchy to array format with location names
+    const hierarchyByLocation = locations.map(location => ({
+      location: location,
+      engineers: locationHierarchy[location.id] || [],
+    })).filter(loc => loc.engineers.length > 0); // Only show locations with engineers
     
     // Also include unassigned users
     const unassignedCashiers = users.filter(u => 
@@ -257,7 +352,8 @@ export default function UserManagement() {
     const admins = users.filter(u => u.role === "admin");
     
     return {
-      hierarchy,
+      hierarchyByLocation,
+      unassignedEngineers,
       unassignedCashiers,
       unassignedEmployees,
       admins,
@@ -446,6 +542,20 @@ export default function UserManagement() {
         if (profileUpdateError) throw profileUpdateError;
       }
 
+      // If creating an engineer and locations are selected, assign them
+      if (validated.role === "engineer" && formData.locationIds && formData.locationIds.length > 0) {
+        const locationAssignments = formData.locationIds.map(locationId => ({
+          engineer_id: authData.user.id,
+          location_id: locationId,
+        }));
+
+        const { error: locationError } = await supabase
+          .from("engineer_locations")
+          .insert(locationAssignments);
+
+        if (locationError) throw locationError;
+      }
+
       toast({
         title: "User Created Successfully",
         description: `${validated.name} has been created as ${validated.role}. They will receive an email to confirm their account.`,
@@ -459,8 +569,24 @@ export default function UserManagement() {
         password: "",
         reportingEngineerId: "none",
         cashierAssignedEngineerId: "none",
+        locationIds: [],
       });
       setShowPassword(false);
+      
+      // Reload engineer locations
+      const { data: elData, error: elError } = await supabase
+        .from("engineer_locations")
+        .select("engineer_id, location_id");
+      if (!elError && elData) {
+        const assignments: Record<string, string[]> = {};
+        elData.forEach((el: any) => {
+          if (!assignments[el.engineer_id]) {
+            assignments[el.engineer_id] = [];
+          }
+          assignments[el.engineer_id].push(el.location_id);
+        });
+        setEngineerLocations(assignments);
+      }
 
     } catch (error: any) {
       console.error("Error creating user:", error);
@@ -501,7 +627,7 @@ export default function UserManagement() {
 
   const openEditDialog = (u: { user_id: string; name: string; email: string; balance: number; role: string }) => {
     setUserToEdit(u);
-    // Fetch assignments (engineer for employee, engineer for cashier)
+    // Fetch assignments (engineer for employee, engineer for cashier, locations for engineer)
     const fetchAssignments = async () => {
       try {
         const { data } = await supabase
@@ -510,6 +636,16 @@ export default function UserManagement() {
           .eq("user_id", u.user_id)
           .single();
         
+        // Fetch locations for engineers
+        let locationIds: string[] = [];
+        if (u.role === "engineer") {
+          const { data: locationData } = await supabase
+            .from("engineer_locations")
+            .select("location_id")
+            .eq("engineer_id", u.user_id);
+          locationIds = (locationData || []).map((l: any) => l.location_id);
+        }
+        
         setEditFormData({
           name: u.name,
           email: u.email,
@@ -517,6 +653,7 @@ export default function UserManagement() {
           reportingEngineerId: (data as any)?.reporting_engineer_id || "none",
           cashierAssignedEngineerId: (data as any)?.cashier_assigned_engineer_id || "none",
           assignedCashierId: (data as any)?.assigned_cashier_id || "none",
+          locationIds: locationIds,
         });
       } catch (e) {
         setEditFormData({
@@ -526,6 +663,7 @@ export default function UserManagement() {
           reportingEngineerId: "none",
           cashierAssignedEngineerId: "none",
           assignedCashierId: "none",
+          locationIds: [],
         });
       }
     };
@@ -614,6 +752,39 @@ export default function UserManagement() {
 
       if (roleError) throw roleError;
 
+      // Update engineer locations if role is engineer
+      if (editFormData.role === "engineer") {
+        // Delete existing location assignments
+        const { error: deleteError } = await supabase
+          .from("engineer_locations")
+          .delete()
+          .eq("engineer_id", userToEdit.user_id);
+
+        if (deleteError) throw deleteError;
+
+        // Insert new location assignments
+        if (editFormData.locationIds && editFormData.locationIds.length > 0) {
+          const locationAssignments = editFormData.locationIds.map(locationId => ({
+            engineer_id: userToEdit.user_id,
+            location_id: locationId,
+          }));
+
+          const { error: locationError } = await supabase
+            .from("engineer_locations")
+            .insert(locationAssignments);
+
+          if (locationError) throw locationError;
+        }
+      } else {
+        // Remove location assignments if role is not engineer
+        const { error: deleteError } = await supabase
+          .from("engineer_locations")
+          .delete()
+          .eq("engineer_id", userToEdit.user_id);
+
+        if (deleteError) throw deleteError;
+      }
+
       toast({
         title: "User Updated",
         description: `${editFormData.name}'s information has been updated successfully`,
@@ -621,6 +792,21 @@ export default function UserManagement() {
 
       setEditDialogOpen(false);
       setUserToEdit(null);
+      
+      // Reload engineer locations
+      const { data: elData, error: elError } = await supabase
+        .from("engineer_locations")
+        .select("engineer_id, location_id");
+      if (!elError && elData) {
+        const assignments: Record<string, string[]> = {};
+        elData.forEach((el: any) => {
+          if (!assignments[el.engineer_id]) {
+            assignments[el.engineer_id] = [];
+          }
+          assignments[el.engineer_id].push(el.location_id);
+        });
+        setEngineerLocations(assignments);
+      }
       
       // Reload users list
       const loadUsers = async () => {
@@ -1048,7 +1234,7 @@ export default function UserManagement() {
                       <th className="px-2 sm:px-4 py-2 sm:py-3 font-semibold text-slate-700 bg-slate-50 min-w-[140px]">Name / Email</th>
                       <th className="px-2 sm:px-4 py-2 sm:py-3 font-semibold text-slate-700 bg-slate-50 min-w-[120px] hidden sm:table-cell">Email</th>
                       <th className="px-2 sm:px-4 py-2 sm:py-3 font-semibold text-slate-700 bg-slate-50 min-w-[100px]">Role</th>
-                      <th className="px-2 sm:px-4 py-2 sm:py-3 font-semibold text-slate-700 bg-slate-50 min-w-[120px] hidden md:table-cell">Assigned Engineer</th>
+                      <th className="px-2 sm:px-4 py-2 sm:py-3 font-semibold text-slate-700 bg-slate-50 min-w-[120px] hidden md:table-cell">Assigned Manager</th>
                       <th className="px-2 sm:px-4 py-2 sm:py-3 font-semibold text-slate-700 bg-slate-50 min-w-[100px] hidden sm:table-cell">Balance</th>
                       <th className="px-2 sm:px-4 py-2 sm:py-3 font-semibold text-slate-700 text-right bg-slate-50 min-w-[120px]">Balance / Actions</th>
                   </tr>
@@ -1137,7 +1323,24 @@ export default function UserManagement() {
                 <div className="text-center py-8 text-gray-500">Loading hierarchy...</div>
               ) : (() => {
                 const hierarchyData = buildHierarchy();
-                const filteredHierarchy = searchTerm ? hierarchyData.hierarchy.filter(h => {
+                
+                // Filter hierarchy by location
+                const filteredHierarchyByLocation = searchTerm ? hierarchyData.hierarchyByLocation.map(loc => ({
+                  ...loc,
+                  engineers: loc.engineers.filter(h => {
+                    const search = searchTerm.toLowerCase();
+                    return (
+                      h.engineer.name.toLowerCase().includes(search) ||
+                      h.engineer.email.toLowerCase().includes(search) ||
+                      h.cashiers.some(c => c.name.toLowerCase().includes(search) || c.email.toLowerCase().includes(search)) ||
+                      h.employees.some(e => e.name.toLowerCase().includes(search) || e.email.toLowerCase().includes(search)) ||
+                      loc.location.name.toLowerCase().includes(search)
+                    );
+                  })
+                })).filter(loc => loc.engineers.length > 0) : hierarchyData.hierarchyByLocation;
+                
+                // Filter unassigned engineers
+                const filteredUnassignedEngineers = searchTerm ? hierarchyData.unassignedEngineers.filter(h => {
                   const search = searchTerm.toLowerCase();
                   return (
                     h.engineer.name.toLowerCase().includes(search) ||
@@ -1145,7 +1348,7 @@ export default function UserManagement() {
                     h.cashiers.some(c => c.name.toLowerCase().includes(search) || c.email.toLowerCase().includes(search)) ||
                     h.employees.some(e => e.name.toLowerCase().includes(search) || e.email.toLowerCase().includes(search))
                   );
-                }) : hierarchyData.hierarchy;
+                }) : hierarchyData.unassignedEngineers;
                 
                 return (
                   <div className="space-y-8">
@@ -1153,7 +1356,7 @@ export default function UserManagement() {
                     <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 mb-4 sm:mb-6">
                       <div className="bg-blue-50 p-3 sm:p-4 rounded-lg border border-blue-200">
                         <div className="text-xl sm:text-2xl font-bold text-blue-900">{hierarchyData.totalEngineers}</div>
-                        <div className="text-xs sm:text-sm text-blue-700">Engineers</div>
+                        <div className="text-xs sm:text-sm text-blue-700">Managers</div>
                       </div>
                       <div className="bg-purple-50 p-3 sm:p-4 rounded-lg border border-purple-200">
                         <div className="text-xl sm:text-2xl font-bold text-purple-900">{hierarchyData.totalCashiers}</div>
@@ -1169,112 +1372,216 @@ export default function UserManagement() {
                       </div>
                     </div>
 
-                    {/* Hierarchy View */}
-                    {filteredHierarchy.length === 0 ? (
+                    {/* Hierarchy View by Location */}
+                    {filteredHierarchyByLocation.length === 0 && filteredUnassignedEngineers.length === 0 ? (
                       <div className="text-center py-8 text-gray-500">No engineers found</div>
                     ) : (
-                      <div className="space-y-4 sm:space-y-6">
-                        {filteredHierarchy.map((item, idx) => (
-                          <div key={item.engineer.user_id || idx} className="border rounded-lg p-4 sm:p-6 bg-gradient-to-br from-blue-50 to-indigo-50">
-                            {/* Engineer Level */}
-                            <div className="mb-3 sm:mb-4">
-                              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0 mb-2">
-                                <div 
-                                  className="flex items-center gap-2 sm:gap-3 cursor-pointer hover:opacity-90 transition-opacity duration-150"
-                                  onClick={() => openUserDrawer(item.engineer)}
-                                >
-                                  <div className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-base sm:text-lg flex-shrink-0">
-                                    {item.engineer.name.charAt(0).toUpperCase()}
-                                  </div>
-                                  <div className="min-w-0 flex-1">
-                                    <div className="font-bold text-base sm:text-lg text-gray-900 truncate">{item.engineer.name}</div>
-                                    <div className="text-xs sm:text-sm text-gray-600 truncate">{item.engineer.email}</div>
-                                    <div className="text-xs sm:text-sm font-semibold text-blue-700 mt-1">
-                                      Balance: {formatINR(Number(item.engineer.balance ?? 0))}
-                                    </div>
-                                  </div>
-                                  <Badge variant="default" className="bg-blue-600 text-xs sm:text-sm flex-shrink-0">Engineer</Badge>
-                                </div>
-                                <div className="text-left sm:text-right">
-                                  <div className="text-xs sm:text-sm text-gray-600">Team Stats</div>
-                                  <div className="font-semibold text-sm sm:text-base text-gray-900">
-                                    {item.cashierCount} Cashier{item.cashierCount !== 1 ? 's' : ''} • {item.employeeCount} Employee{item.employeeCount !== 1 ? 's' : ''}
-                                  </div>
-                                </div>
+                      <div className="space-y-6 sm:space-y-8">
+                        {/* Locations with Engineers */}
+                        {filteredHierarchyByLocation.map((locationData, locIdx) => (
+                          <div key={locationData.location.id} className="border-2 border-indigo-200 rounded-lg p-4 sm:p-6 bg-gradient-to-br from-indigo-50 to-purple-50">
+                            {/* Location Header */}
+                            <div className="mb-4 sm:mb-6 pb-3 sm:pb-4 border-b border-indigo-200">
+                              <div className="flex items-center gap-2 sm:gap-3">
+                                <MapPin className="h-5 w-5 sm:h-6 sm:w-6 text-indigo-600" />
+                                <h3 className="text-lg sm:text-xl font-bold text-indigo-900">{locationData.location.name}</h3>
+                                <Badge variant="outline" className="bg-indigo-100 text-indigo-700 border-indigo-300">
+                                  {locationData.engineers.length} Manager{locationData.engineers.length !== 1 ? 's' : ''}
+                                </Badge>
                               </div>
                             </div>
+                            
+                            {/* Managers under this location */}
+                            <div className="space-y-4 sm:space-y-6">
+                              {locationData.engineers.map((item, idx) => (
+                                <div key={item.engineer.user_id || idx} className="border rounded-lg p-4 sm:p-6 bg-gradient-to-br from-blue-50 to-indigo-50 ml-0 sm:ml-4">
+                                  {/* Manager Level */}
+                                  <div className="mb-3 sm:mb-4">
+                                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0 mb-2">
+                                      <div 
+                                        className="flex items-center gap-2 sm:gap-3 cursor-pointer hover:opacity-90 transition-opacity duration-150"
+                                        onClick={() => openUserDrawer(item.engineer)}
+                                      >
+                                        <div className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-base sm:text-lg flex-shrink-0">
+                                          {item.engineer.name.charAt(0).toUpperCase()}
+                                        </div>
+                                        <div className="min-w-0 flex-1">
+                                          <div className="font-bold text-base sm:text-lg text-gray-900 truncate">{item.engineer.name}</div>
+                                          <div className="text-xs sm:text-sm text-gray-600 truncate">{item.engineer.email}</div>
+                                          <div className="text-xs sm:text-sm font-semibold text-blue-700 mt-1">
+                                            Balance: {formatINR(Number(item.engineer.balance ?? 0))}
+                                          </div>
+                                        </div>
+                                        <Badge variant="default" className="bg-blue-600 text-xs sm:text-sm flex-shrink-0">Manager</Badge>
+                                      </div>
+                                      <div className="text-left sm:text-right">
+                                        <div className="text-xs sm:text-sm text-gray-600">Team Stats</div>
+                                        <div className="font-semibold text-sm sm:text-base text-gray-900">
+                                          {item.cashierCount} Cashier{item.cashierCount !== 1 ? 's' : ''} • {item.employeeCount} Employee{item.employeeCount !== 1 ? 's' : ''}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
 
-                            {/* Cashiers Level */}
+                            {/* Cashiers Level - Only one cashier per manager */}
                             {item.cashiers.length > 0 && (
                               <div className="ml-0 sm:ml-4 md:ml-8 mb-3 sm:mb-4">
                                 <div className="text-xs sm:text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                                   <div className="w-12 sm:w-24 h-0.5 bg-purple-300"></div>
-                                  <span>Cashiers ({item.cashiers.length})</span>
+                                  <span>Cashier{item.cashiers.length !== 1 ? 's' : ''} ({item.cashiers.length})</span>
                                 </div>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3">
-                                  {item.cashiers.map((cashier, cIdx) => (
-                                    <div 
-                                      key={cashier.user_id || cIdx} 
-                                      className="bg-white rounded-lg p-4 border border-purple-200 shadow-sm cursor-pointer hover:border-purple-300 transition-colors"
-                                      onClick={() => openUserDrawer(cashier)}
-                                    >
-                                      <div className="flex items-center gap-2 mb-2">
-                                        <div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
-                                          {cashier.name.charAt(0).toUpperCase()}
+                                  {item.cashiers.map((cashier, cIdx) => {
+                                    // Count employees managed by this cashier (employees under the engineer that are assigned to this cashier)
+                                    const employeesManaged = item.employees.filter((emp: any) => 
+                                      emp.assigned_cashier_name === cashier.name
+                                    ).length;
+                                    
+                                    return (
+                                      <div 
+                                        key={cashier.user_id || `cashier-${cIdx}-${cashier.name}`} 
+                                        className="bg-white rounded-lg p-4 border border-purple-200 shadow-sm cursor-pointer hover:border-purple-300 transition-colors"
+                                        onClick={() => openUserDrawer(cashier)}
+                                      >
+                                        <div className="flex items-center gap-2 mb-2">
+                                          <div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
+                                            {cashier.name.charAt(0).toUpperCase()}
+                                          </div>
+                                          <div className="flex-1 min-w-0">
+                                            <div className="font-semibold text-sm text-gray-900 truncate">{cashier.name}</div>
+                                            <div className="text-xs text-gray-500 truncate">{cashier.email}</div>
+                                          </div>
+                                          <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-300 text-xs">Cashier</Badge>
                                         </div>
-                                        <div className="flex-1 min-w-0">
-                                          <div className="font-semibold text-sm text-gray-900 truncate">{cashier.name}</div>
-                                          <div className="text-xs text-gray-500 truncate">{cashier.email}</div>
+                                        <div className="text-xs text-gray-600 space-y-1">
+                                          <div>Balance: {formatINR(Number(cashier.balance ?? 0))}</div>
+                                          <div>Manages: {employeesManaged} employee{employeesManaged !== 1 ? 's' : ''}</div>
                                         </div>
-                                        <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-300 text-xs">Cashier</Badge>
                                       </div>
-                                      <div className="text-xs text-gray-600 space-y-1">
-                                        <div>Balance: {formatINR(Number(cashier.balance ?? 0))}</div>
-                                        <div>Manages: {item.employees.length} employee{item.employees.length !== 1 ? 's' : ''}</div>
-                                      </div>
-                                    </div>
-                                  ))}
+                                    );
+                                  })}
                                 </div>
                               </div>
                             )}
 
-                            {/* Employees Level */}
-                            {item.employees.length > 0 && (
-                              <div className="ml-0 sm:ml-4 md:ml-8">
-                                <div className="text-xs sm:text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                                  <div className="w-12 sm:w-24 h-0.5 bg-green-300"></div>
-                                  <span>Employees ({item.employees.length})</span>
-                                </div>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
-                                  {item.employees.map((employee, eIdx) => (
-                                    <div 
-                                      key={employee.user_id || eIdx} 
-                                      className="bg-white rounded-lg p-3 border border-green-200 shadow-sm cursor-pointer hover:border-green-300 transition-colors"
-                                      onClick={() => openUserDrawer(employee)}
-                                    >
-                                      <div className="flex items-center gap-2">
-                                        <div className="w-6 h-6 bg-green-600 rounded-full flex items-center justify-center text-white font-bold text-xs">
-                                          {employee.name.charAt(0).toUpperCase()}
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                          <div className="font-medium text-xs text-gray-900 truncate">{employee.name}</div>
-                                          <div className="text-xs text-gray-500 truncate">{employee.email}</div>
-                                        </div>
+                                  {/* Employees Level */}
+                                  {item.employees.length > 0 && (
+                                    <div className="ml-0 sm:ml-4 md:ml-8">
+                                      <div className="text-xs sm:text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                                        <div className="w-12 sm:w-24 h-0.5 bg-green-300"></div>
+                                        <span>Employees ({item.employees.length})</span>
                                       </div>
-                                      <div className="text-xs text-gray-600 mt-1">
-                                        Balance: {formatINR(Number(employee.balance ?? 0))}
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                                        {item.employees.map((employee, eIdx) => (
+                                          <div 
+                                            key={employee.user_id || eIdx} 
+                                            className="bg-white rounded-lg p-3 border border-green-200 shadow-sm cursor-pointer hover:border-green-300 transition-colors"
+                                            onClick={() => openUserDrawer(employee)}
+                                          >
+                                            <div className="flex items-center gap-2">
+                                              <div className="w-6 h-6 bg-green-600 rounded-full flex items-center justify-center text-white font-bold text-xs">
+                                                {employee.name.charAt(0).toUpperCase()}
+                                              </div>
+                                              <div className="flex-1 min-w-0">
+                                                <div className="font-medium text-xs text-gray-900 truncate">{employee.name}</div>
+                                                <div className="text-xs text-gray-500 truncate">{employee.email}</div>
+                                              </div>
+                                            </div>
+                                            <div className="text-xs text-gray-600 mt-1">
+                                              Balance: {formatINR(Number(employee.balance ?? 0))}
+                                            </div>
+                                          </div>
+                                        ))}
                                       </div>
                                     </div>
-                                  ))}
+                                  )}
                                 </div>
-                              </div>
-                            )}
-
-                            {item.cashiers.length === 0 && item.employees.length === 0 && (
-                              <div className="ml-8 text-sm text-gray-500 italic">No cashiers or employees assigned</div>
-                            )}
+                              ))}
+                            </div>
                           </div>
                         ))}
+                        
+                        {/* Unassigned Managers (no location) */}
+                        {filteredUnassignedEngineers.length > 0 && (
+                          <div className="border-2 border-gray-200 rounded-lg p-4 sm:p-6 bg-gradient-to-br from-gray-50 to-slate-50">
+                            <div className="mb-4 sm:mb-6 pb-3 sm:pb-4 border-b border-gray-200">
+                              <div className="flex items-center gap-2 sm:gap-3">
+                                <AlertCircle className="h-5 w-5 sm:h-6 sm:w-6 text-gray-600" />
+                                <h3 className="text-lg sm:text-xl font-bold text-gray-900">Unassigned Managers</h3>
+                                <Badge variant="outline" className="bg-gray-100 text-gray-700 border-gray-300">
+                                  {filteredUnassignedEngineers.length} Manager{filteredUnassignedEngineers.length !== 1 ? 's' : ''}
+                                </Badge>
+                              </div>
+                              <p className="text-xs sm:text-sm text-gray-600 mt-2">Managers without location assignments</p>
+                            </div>
+                            
+                            <div className="space-y-4 sm:space-y-6">
+                              {filteredUnassignedEngineers.map((item, idx) => (
+                                <div key={item.engineer.user_id || idx} className="border rounded-lg p-4 sm:p-6 bg-gradient-to-br from-blue-50 to-indigo-50">
+                                  {/* Manager Level */}
+                                  <div className="mb-3 sm:mb-4">
+                                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0 mb-2">
+                                      <div 
+                                        className="flex items-center gap-2 sm:gap-3 cursor-pointer hover:opacity-90 transition-opacity duration-150"
+                                        onClick={() => openUserDrawer(item.engineer)}
+                                      >
+                                        <div className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-base sm:text-lg flex-shrink-0">
+                                          {item.engineer.name.charAt(0).toUpperCase()}
+                                        </div>
+                                        <div className="min-w-0 flex-1">
+                                          <div className="font-bold text-base sm:text-lg text-gray-900 truncate">{item.engineer.name}</div>
+                                          <div className="text-xs sm:text-sm text-gray-600 truncate">{item.engineer.email}</div>
+                                          <div className="text-xs sm:text-sm font-semibold text-blue-700 mt-1">
+                                            Balance: {formatINR(Number(item.engineer.balance ?? 0))}
+                                          </div>
+                                        </div>
+                                        <Badge variant="default" className="bg-blue-600 text-xs sm:text-sm flex-shrink-0">Manager</Badge>
+                                      </div>
+                                      <div className="text-left sm:text-right">
+                                        <div className="text-xs sm:text-sm text-gray-600">Team Stats</div>
+                                        <div className="font-semibold text-sm sm:text-base text-gray-900">
+                                          {item.cashierCount} Cashier{item.cashierCount !== 1 ? 's' : ''} • {item.employeeCount} Employee{item.employeeCount !== 1 ? 's' : ''}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Employees Level */}
+                                  {item.employees.length > 0 && (
+                                    <div className="ml-0 sm:ml-4 md:ml-8">
+                                      <div className="text-xs sm:text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                                        <div className="w-12 sm:w-24 h-0.5 bg-green-300"></div>
+                                        <span>Employees ({item.employees.length})</span>
+                                      </div>
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                                        {item.employees.map((employee, eIdx) => (
+                                          <div 
+                                            key={employee.user_id || eIdx} 
+                                            className="bg-white rounded-lg p-3 border border-green-200 shadow-sm cursor-pointer hover:border-green-300 transition-colors"
+                                            onClick={() => openUserDrawer(employee)}
+                                          >
+                                            <div className="flex items-center gap-2">
+                                              <div className="w-6 h-6 bg-green-600 rounded-full flex items-center justify-center text-white font-bold text-xs">
+                                                {employee.name.charAt(0).toUpperCase()}
+                                              </div>
+                                              <div className="flex-1 min-w-0">
+                                                <div className="font-medium text-xs text-gray-900 truncate">{employee.name}</div>
+                                                <div className="text-xs text-gray-500 truncate">{employee.email}</div>
+                                              </div>
+                                            </div>
+                                            <div className="text-xs text-gray-600 mt-1">
+                                              Balance: {formatINR(Number(employee.balance ?? 0))}
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -1427,7 +1734,7 @@ export default function UserManagement() {
                                 <Settings className="h-4 w-4 text-blue-600" />
                               </div>
                               <div>
-                                <div className="font-medium">Engineer</div>
+                                <div className="font-medium">Manager</div>
                                 <div className="text-xs text-gray-500">Review and verify expenses</div>
                               </div>
                             </div>
@@ -1461,7 +1768,7 @@ export default function UserManagement() {
 
                    {formData.role === "employee" && (
                   <div className="space-y-3">
-                    <Label htmlFor="reportingEngineer" className="text-sm font-medium text-gray-700">Assign Engineer (for Employee)</Label>
+                    <Label htmlFor="reportingEngineer" className="text-sm font-medium text-gray-700">Assign Manager (for Employee)</Label>
                     <Select
                       value={formData.reportingEngineerId || "none"}
                       onValueChange={(value) => setFormData(prev => ({ ...prev, reportingEngineerId: value }))}
@@ -1478,7 +1785,7 @@ export default function UserManagement() {
                         ))}
                       </SelectContent>
                     </Select>
-                    <p className="text-xs text-gray-500">If set, all expenses will auto-assign to this engineer.</p>
+                    <p className="text-xs text-gray-500">If set, all expenses will auto-assign to this manager.</p>
                   </div>
                    )}
 
@@ -1507,7 +1814,7 @@ export default function UserManagement() {
 
                    {formData.role === "cashier" && (
                      <div className="space-y-3">
-                       <Label htmlFor="cashierEngineer" className="text-sm font-medium text-gray-700">Assign Engineer (Zone/Department)</Label>
+                       <Label htmlFor="cashierEngineer" className="text-sm font-medium text-gray-700">Assign Manager (Zone/Department)</Label>
                        <Select
                          value={formData.cashierAssignedEngineerId || "none"}
                          onValueChange={(value) => setFormData(prev => ({ ...prev, cashierAssignedEngineerId: value }))}
@@ -1533,7 +1840,48 @@ export default function UserManagement() {
                            ))}
                          </SelectContent>
                        </Select>
-                       <p className="text-xs text-gray-500">If set, this cashier can only manage employees under the selected engineer's zone/department. Each engineer can only have one cashier.</p>
+                       <p className="text-xs text-gray-500">If set, this cashier can only manage employees under the selected manager's zone/department. Each manager can only have one cashier.</p>
+                     </div>
+                   )}
+
+                   {formData.role === "engineer" && (
+                     <div className="space-y-3 md:col-span-2 border-t pt-4 mt-2">
+                       <Label htmlFor="locations" className="text-sm font-medium text-gray-700 whitespace-nowrap flex items-center gap-2">
+                         <MapPin className="h-4 w-4 text-blue-600" />
+                         Assign Locations
+                       </Label>
+                       <div className="border rounded-lg p-3 sm:p-4 space-y-2 sm:space-y-3 max-h-40 sm:max-h-48 overflow-y-auto bg-gray-50">
+                         {locations.length === 0 ? (
+                           <p className="text-xs sm:text-sm text-gray-500 whitespace-nowrap">No locations available. Create locations in Settings first.</p>
+                         ) : (
+                           locations.map((location) => (
+                             <div key={location.id} className="flex items-center space-x-2">
+                               <Checkbox
+                                 id={`location-${location.id}`}
+                                 checked={formData.locationIds?.includes(location.id) || false}
+                                 onCheckedChange={(checked) => {
+                                   setFormData(prev => {
+                                     const currentIds = prev.locationIds || [];
+                                     if (checked) {
+                                       return { ...prev, locationIds: [...currentIds, location.id] };
+                                     } else {
+                                       return { ...prev, locationIds: currentIds.filter(id => id !== location.id) };
+                                     }
+                                   });
+                                 }}
+                               />
+                               <label
+                                 htmlFor={`location-${location.id}`}
+                                 className="text-xs sm:text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex items-center gap-2 whitespace-nowrap"
+                               >
+                                 <MapPin className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-gray-500 flex-shrink-0" />
+                                 <span className="truncate">{location.name}</span>
+                               </label>
+                             </div>
+                           ))
+                         )}
+                       </div>
+                       <p className="text-xs text-gray-500 whitespace-nowrap">Select one or more locations for this manager. Useful for income tax audits and organizational structure.</p>
                      </div>
                    )}
 
@@ -1608,7 +1956,7 @@ export default function UserManagement() {
                     </div>
                     <div className="flex items-center gap-2">
                       <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                      <span><strong>Engineer:</strong> Review and verify assigned expenses</span>
+                      <span><strong>Manager:</strong> Review and verify assigned expenses</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
@@ -1824,39 +2172,41 @@ export default function UserManagement() {
 
       {/* Edit User Dialog */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Edit User</DialogTitle>
-            <DialogDescription>Update user information and role</DialogDescription>
+        <DialogContent className="max-w-2xl max-h-[90vh] sm:max-h-[85vh] flex flex-col">
+          <DialogHeader className="flex-shrink-0">
+            <DialogTitle className="whitespace-nowrap">Edit User</DialogTitle>
+            <DialogDescription className="whitespace-nowrap">Update user information and role</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+          <div className="space-y-4 py-4 overflow-y-auto flex-1 min-h-0">
             <div className="space-y-2">
-              <Label htmlFor="edit-name">Name *</Label>
+              <Label htmlFor="edit-name" className="whitespace-nowrap">Name *</Label>
               <Input
                 id="edit-name"
                 value={editFormData.name}
                 onChange={(e) => setEditFormData(prev => ({ ...prev, name: e.target.value }))}
                 placeholder="Full name"
+                className="whitespace-nowrap"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="edit-email">Email *</Label>
+              <Label htmlFor="edit-email" className="whitespace-nowrap">Email *</Label>
               <Input
                 id="edit-email"
                 type="email"
                 value={editFormData.email}
                 onChange={(e) => setEditFormData(prev => ({ ...prev, email: e.target.value }))}
                 placeholder="email@example.com"
+                className="whitespace-nowrap"
               />
             </div>
             {/* Password Reset Section - Only for non-admin users */}
             {userToEdit && userToEdit.role !== "admin" && (
               <div className="space-y-2 border-t pt-4">
                 <div className="flex items-center gap-2">
-                  <Lock className="h-4 w-4 text-muted-foreground" />
-                  <Label>Reset Password</Label>
+                  <Lock className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                  <Label className="whitespace-nowrap">Reset Password</Label>
                 </div>
-                <p className="text-sm text-muted-foreground">
+                <p className="text-xs sm:text-sm text-muted-foreground whitespace-nowrap">
                   Reset this user's password. You'll need to enter your admin password to confirm.
                 </p>
                 <Button
@@ -1868,15 +2218,15 @@ export default function UserManagement() {
                     setAdminPassword("");
                     setNewUserPassword("");
                   }}
-                  className="w-full"
+                  className="w-full whitespace-nowrap"
                 >
-                  <Lock className="h-4 w-4 mr-2" />
+                  <Lock className="h-4 w-4 mr-2 flex-shrink-0" />
                   Reset Password
                 </Button>
               </div>
             )}
             <div className="space-y-2">
-              <Label htmlFor="edit-role">Role *</Label>
+              <Label htmlFor="edit-role" className="whitespace-nowrap">Role *</Label>
               <Select
                 value={editFormData.role}
                 onValueChange={(value: "admin" | "engineer" | "employee" | "cashier") => 
@@ -1888,7 +2238,7 @@ export default function UserManagement() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="employee">Employee</SelectItem>
-                  <SelectItem value="engineer">Engineer</SelectItem>
+                  <SelectItem value="engineer">Manager</SelectItem>
                   <SelectItem value="admin">Admin</SelectItem>
                   <SelectItem value="cashier">Cashier</SelectItem>
                 </SelectContent>
@@ -1896,13 +2246,13 @@ export default function UserManagement() {
             </div>
             {editFormData.role === "employee" && (
               <div className="space-y-2">
-                <Label htmlFor="edit-engineer">Assign Engineer</Label>
+                <Label htmlFor="edit-engineer" className="whitespace-nowrap">Assign Manager</Label>
                 <Select
                   value={editFormData.reportingEngineerId}
                   onValueChange={(value) => setEditFormData(prev => ({ ...prev, reportingEngineerId: value }))}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Select engineer" />
+                    <SelectValue placeholder="Select manager" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Unassigned</SelectItem>
@@ -1913,12 +2263,12 @@ export default function UserManagement() {
                     ))}
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-muted-foreground">If set, all expenses will auto-assign to this engineer.</p>
+                <p className="text-xs text-muted-foreground whitespace-nowrap">If set, all expenses will auto-assign to this manager.</p>
               </div>
             )}
             {editFormData.role === "employee" && (
               <div className="space-y-2">
-                <Label htmlFor="edit-cashier">Assign Cashier</Label>
+                <Label htmlFor="edit-cashier" className="whitespace-nowrap">Assign Cashier</Label>
                 <Select
                   value={editFormData.assignedCashierId}
                   onValueChange={(value) => setEditFormData(prev => ({ ...prev, assignedCashierId: value }))}
@@ -1935,40 +2285,77 @@ export default function UserManagement() {
                     ))}
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-muted-foreground">Employee will return money to this cashier.</p>
+                <p className="text-xs text-muted-foreground whitespace-nowrap">Employee will return money to this cashier.</p>
               </div>
             )}
             {editFormData.role === "engineer" && (
-              <div className="space-y-2">
-                <Label htmlFor="edit-engineer-cashier">Assign Cashier</Label>
-                <Select
-                  value={editFormData.assignedCashierId}
-                  onValueChange={(value) => setEditFormData(prev => ({ ...prev, assignedCashierId: value }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select cashier" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Unassigned</SelectItem>
-                    {cashiers.map(c => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.name} ({c.email})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">Engineer will return money to this cashier.</p>
-              </div>
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-engineer-cashier" className="whitespace-nowrap">Assign Cashier</Label>
+                  <Select
+                    value={editFormData.assignedCashierId}
+                    onValueChange={(value) => setEditFormData(prev => ({ ...prev, assignedCashierId: value }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select cashier" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Unassigned</SelectItem>
+                      {cashiers.map(c => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.name} ({c.email})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground whitespace-nowrap">Manager will return money to this cashier.</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-locations" className="whitespace-nowrap">Assign Locations</Label>
+                  <div className="border rounded-lg p-3 sm:p-4 space-y-2 sm:space-y-3 max-h-40 sm:max-h-48 overflow-y-auto">
+                    {locations.length === 0 ? (
+                      <p className="text-xs sm:text-sm text-gray-500 whitespace-nowrap">No locations available. Create locations in Settings first.</p>
+                    ) : (
+                      locations.map((location) => (
+                        <div key={location.id} className="flex items-center space-x-2">
+                          <Checkbox
+                            id={`edit-location-${location.id}`}
+                            checked={editFormData.locationIds?.includes(location.id) || false}
+                            onCheckedChange={(checked) => {
+                              setEditFormData(prev => {
+                                const currentIds = prev.locationIds || [];
+                                if (checked) {
+                                  return { ...prev, locationIds: [...currentIds, location.id] };
+                                } else {
+                                  return { ...prev, locationIds: currentIds.filter(id => id !== location.id) };
+                                }
+                              });
+                            }}
+                          />
+                          <label
+                            htmlFor={`edit-location-${location.id}`}
+                            className="text-xs sm:text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex items-center gap-2 whitespace-nowrap"
+                          >
+                            <MapPin className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-gray-500 flex-shrink-0" />
+                            <span className="truncate">{location.name}</span>
+                          </label>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground whitespace-nowrap">Select one or more locations for this manager. Useful for income tax audits and organizational structure.</p>
+                </div>
+              </>
             )}
             {editFormData.role === "cashier" && (
               <div className="space-y-2">
-                <Label htmlFor="edit-cashier-engineer">Assign Engineer (Zone/Department)</Label>
+                <Label htmlFor="edit-cashier-engineer" className="whitespace-nowrap">Assign Manager (Zone/Department)</Label>
                 <Select
                   value={editFormData.cashierAssignedEngineerId}
                   onValueChange={(value) => setEditFormData(prev => ({ ...prev, cashierAssignedEngineerId: value }))}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Select engineer" />
+                    <SelectValue placeholder="Select manager" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Unassigned (Can manage all)</SelectItem>
@@ -1989,13 +2376,13 @@ export default function UserManagement() {
                     ))}
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-muted-foreground">If set, this cashier can only manage employees under the selected engineer's zone/department. Each engineer can only have one cashier.</p>
+                <p className="text-xs text-muted-foreground whitespace-nowrap">If set, this cashier can only manage employees under the selected manager's zone/department. Each manager can only have one cashier.</p>
               </div>
             )}
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleUpdateUser} disabled={updating}>
+          <DialogFooter className="flex-shrink-0 border-t pt-4 mt-4">
+            <Button variant="outline" onClick={() => setEditDialogOpen(false)} className="whitespace-nowrap">Cancel</Button>
+            <Button onClick={handleUpdateUser} disabled={updating} className="whitespace-nowrap">
               {updating ? "Updating..." : "Update User"}
             </Button>
           </DialogFooter>

@@ -165,8 +165,9 @@ export default function Expenses() {
 
   const exportExpenses = () => {
     const csvContent = [
-      ["Title", "Destination", "Start Date", "End Date", "Amount (INR)", "Status", "Created Date"],
+      ["Transaction #", "Title", "Destination", "Start Date", "End Date", "Amount (INR)", "Status", "Created Date"],
       ...filteredExpenses.map(expense => [
+        escapeCSV((expense as any).transaction_number || ''),
         escapeCSV(expense.title),
         escapeCSV(expense.destination),
         format(new Date(expense.trip_start), "yyyy-MM-dd"),
@@ -626,9 +627,10 @@ export default function Expenses() {
                   <Table className="min-w-full">
                   <TableHeader>
                     <TableRow>
+                        <TableHead className="min-w-[80px] whitespace-nowrap">Txn #</TableHead>
                         <TableHead className="min-w-[140px] sm:min-w-[140px]">Title / Destination</TableHead>
                         <TableHead className="min-w-[100px] hidden sm:table-cell">Destination</TableHead>
-                        <TableHead className="min-w-[100px] hidden sm:table-cell">Date</TableHead>
+                        <TableHead className="min-w-[100px] hidden sm:table-cell">Trip Start</TableHead>
                         <TableHead className="min-w-[90px] whitespace-nowrap">Amount</TableHead>
                         <TableHead className="min-w-[100px] hidden sm:table-cell">Status</TableHead>
                         <TableHead className="min-w-[100px] hidden sm:table-cell">Created</TableHead>
@@ -638,6 +640,9 @@ export default function Expenses() {
                 <TableBody>
                   {filteredExpenses.map((expense) => (
                   <TableRow key={expense.id}>
+                    <TableCell className="text-xs sm:text-sm font-mono font-semibold text-blue-600 whitespace-nowrap">
+                      {(expense as any).transaction_number || '-'}
+                    </TableCell>
                     <TableCell className="text-xs sm:text-sm">
                       <div className="font-medium">{expense.title}</div>
                       <div className="text-xs text-muted-foreground sm:hidden mt-1">{expense.destination}</div>

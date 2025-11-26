@@ -46,7 +46,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
       case 'admin':
         return 'Administrator';
       case 'engineer':
-        return 'Engineer';
+        return 'Manager';
       case 'employee':
         return 'Employee';
       case 'cashier':
@@ -123,37 +123,37 @@ export function Layout({ children }: { children: React.ReactNode }) {
           <header className="border-b bg-white/80 backdrop-blur-md supports-[backdrop-filter]:bg-white/60 shadow-sm sticky top-0 z-30">
             <div className="flex h-14 sm:h-16 items-center gap-2 sm:gap-4 px-3 sm:px-6">
               <SidebarTrigger className="hover:bg-gray-100 rounded-lg p-2 transition-colors flex-shrink-0" />
-              <div className="flex-1 min-w-0 flex items-center gap-3">
+              <div className="flex-1 min-w-0 flex items-center gap-2 sm:gap-3">
                 <img 
                   src="/HERO.png" 
                   alt="Hero" 
-                  className="h-6 sm:h-8 w-auto hidden sm:block"
+                  className="h-5 w-auto sm:h-6 md:h-8 flex-shrink-0 hidden sm:block"
                 />
-              <div className="flex-1 min-w-0">
-                <h1 className="text-sm sm:text-base font-semibold text-gray-900 truncate">
+              <div className="flex-1 min-w-0 overflow-hidden">
+                <h1 className="text-xs sm:text-sm md:text-base font-semibold text-gray-900 truncate">
                   Expense Management
                 </h1>
-                <p className="text-xs text-gray-500 hidden sm:block">
+                <p className="text-xs text-gray-500 hidden sm:block truncate">
                     Bikes Auto - Hero MotoCorp
                 </p>
                 </div>
               </div>
               
               {/* User Profile Section */}
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
                 {/* Balance indicator for employees, engineers, and cashiers */}
                 {(userRole === 'employee' || userRole === 'engineer' || userRole === 'cashier') && userBalance !== null && (
-                  <div className={`hidden md:flex items-center gap-2 px-3 py-1 border rounded-lg ${
+                  <div className={`hidden md:flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 border rounded-lg ${
                     userRole === 'cashier' 
                       ? 'bg-purple-50 border-purple-200' 
                       : userRole === 'engineer'
                       ? 'bg-blue-50 border-blue-200'
                       : 'bg-green-50 border-green-200'
                   }`}>
-                    <Wallet className={`h-4 w-4 ${
+                    <Wallet className={`h-3.5 w-3.5 sm:h-4 sm:w-4 flex-shrink-0 ${
                       userRole === 'cashier' ? 'text-purple-600' : userRole === 'engineer' ? 'text-blue-600' : 'text-green-600'
                     }`} />
-                    <span className={`text-sm font-medium ${
+                    <span className={`text-xs sm:text-sm font-medium whitespace-nowrap ${
                       userRole === 'cashier' ? 'text-purple-700' : userRole === 'engineer' ? 'text-blue-700' : 'text-green-700'
                     }`}>
                       <span className={userBalance < 0 ? 'text-red-600' : ''}>
@@ -163,11 +163,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
                   </div>
                 )}
                 
-                <div className="text-right hidden sm:block">
-                  <p className="text-sm font-medium text-gray-900">
+                <div className="text-right hidden sm:block min-w-0 flex-shrink-0">
+                  <p className="text-xs sm:text-sm font-medium text-gray-900 truncate">
                     {userProfile?.name || 'Loading...'}
                   </p>
-                  <p className="text-xs text-gray-500">
+                  <p className="text-xs text-gray-500 truncate">
                     {userRole ? getRoleDisplayName(userRole) : ''}
                   </p>
                 </div>

@@ -152,15 +152,10 @@ export class ExpenseService {
 
   /**
    * Submit an expense for review
+   * If user is admin, automatically approves and deducts from their balance
    */
   static async submitExpense(expenseId: string, userId: string): Promise<Expense> {
-    // Check if user can submit this expense
-    const canEdit = await this.canUserEditExpense(expenseId, userId);
-    if (!canEdit) {
-      throw new Error("You don't have permission to submit this expense");
-    }
-
-    // Get current expense
+    // Get current expense first to check ownership
     const { data: expense, error: fetchError } = await supabase
       .from("expenses")
       .select("*")
@@ -168,6 +163,28 @@ export class ExpenseService {
       .single();
 
     if (fetchError) throw fetchError;
+
+    // Check if user is an admin and this is their own expense - if so, auto-approve and auto-deduct
+    const isAdmin = await this.hasRole(userId, "admin");
+    
+    if (isAdmin && expense.user_id === userId) {
+      // Admin's own expense - auto-approve and auto-deduct (allows negative balance)
+      // First ensure status is "submitted" so approveExpense can handle it
+      if (expense.status !== "submitted") {
+        await supabase
+          .from("expenses")
+          .update({ status: "submitted" })
+          .eq("id", expenseId);
+      }
+      // Auto-approve admin expenses (this will deduct from their balance, allowing negative)
+      return await this.approveExpense(expenseId, userId, "Auto-approved: Admin expense");
+    }
+
+    // Check if user can submit this expense
+    const canEdit = await this.canUserEditExpense(expenseId, userId);
+    if (!canEdit) {
+      throw new Error("You don't have permission to submit this expense");
+    }
 
     if (expense.status !== "submitted") {
       throw new Error("Only submitted expenses can be re-submitted");
@@ -519,7 +536,7 @@ export class ExpenseService {
       const approvalLimit = limitSetting ? parseFloat((limitSetting as any).value) : 50000; // Default to 50000 if not set
       const expenseAmount = Number(expense.total_amount);
       
-      console.log("Engineer approval check:", { 
+      console.log("Manager approval check:", { 
         expenseAmount, 
         approvalLimit, 
         exceeds: expenseAmount > approvalLimit,
@@ -530,7 +547,7 @@ export class ExpenseService {
       // If expense amount > limit, they must verify instead
       if (expenseAmount > approvalLimit) {
         throw new Error(
-          `This expense (${formatINR(expenseAmount)}) exceeds the engineer approval limit of ${formatINR(approvalLimit)}. ` +
+          `This expense (${formatINR(expenseAmount)}) exceeds the manager approval limit of ${formatINR(approvalLimit)}. ` +
           `Please verify this expense instead. It will be sent to admin for final approval.`
         );
       }
@@ -784,7 +801,7 @@ export class ExpenseService {
   }
 
   /**
-   * Check if engineer can review expense
+   * Check if manager can review expense
    */
   private static async canEngineerReviewExpense(expenseId: string, engineerId: string): Promise<boolean> {
     const { data: expense, error } = await supabase

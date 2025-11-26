@@ -11,7 +11,7 @@ import Expenses from "./pages/Expenses";
 import ExpenseForm from "./pages/ExpenseForm";
 import ExpenseDetail from "./pages/ExpenseDetail";
 import AdminPanel from "./pages/AdminPanel";
-import EngineerReview from "./pages/EngineerReview";
+import ManagerReview from "./pages/EngineerReview";
 import Analytics from "./pages/Analytics";
 import Notifications from "./pages/Notifications";
 import UserManagement from "./pages/UserManagement";
@@ -158,7 +158,7 @@ const App = () => (
               element={
                 <ProtectedRoute allowedRoles={["engineer"]}>
                   <Layout>
-                    <EngineerReview />
+                    <ManagerReview />
                   </Layout>
                 </ProtectedRoute>
               }

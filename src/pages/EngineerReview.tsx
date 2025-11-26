@@ -68,7 +68,7 @@ interface Attachment {
   created_at: string;
 }
 
-export default function EngineerReview() {
+export default function ManagerReview() {
   const { user, userRole } = useAuth();
   const { toast } = useToast();
   
@@ -691,6 +691,7 @@ export default function EngineerReview() {
                 <Table className="min-w-full">
                 <TableHeader>
                   <TableRow>
+                      <TableHead className="min-w-[80px] whitespace-nowrap">Txn #</TableHead>
                       <TableHead className="min-w-[140px] sm:min-w-[140px]">Employee / Title</TableHead>
                       <TableHead className="min-w-[100px] hidden sm:table-cell">Title</TableHead>
                       <TableHead className="min-w-[100px] hidden sm:table-cell">Destination</TableHead>
@@ -703,6 +704,9 @@ export default function EngineerReview() {
               <TableBody>
                 {expenses.map((expense) => (
                   <TableRow key={expense.id}>
+                    <TableCell className="text-xs sm:text-sm font-mono font-semibold text-blue-600 whitespace-nowrap">
+                      {(expense as any).transaction_number || '-'}
+                    </TableCell>
                     <TableCell className="text-xs sm:text-sm">
                       <div>
                         <div className="font-medium truncate">{expense.user_name}</div>
@@ -927,10 +931,10 @@ export default function EngineerReview() {
                                 </Card>
                               )}
 
-                              {/* Engineer Review */}
+                              {/* Manager Review */}
                               <Card>
                                 <CardHeader className="pb-3">
-                                  <CardTitle className="text-base">Engineer Review</CardTitle>
+                                  <CardTitle className="text-base">Manager Review</CardTitle>
                                 </CardHeader>
                                 <CardContent className="space-y-4">
                                   <div>

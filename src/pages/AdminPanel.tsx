@@ -93,6 +93,7 @@ export default function AdminPanel() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [reviewLoading, setReviewLoading] = useState(false);
+  const [auditLogs, setAuditLogs] = useState<Array<{action: string; user_name: string; comment?: string; created_at: string}>>([]);
 
   useEffect(() => {
     if (userRole === "admin") {
@@ -162,11 +163,46 @@ export default function AdminPanel() {
     }
   };
 
+  const fetchAuditLogs = async (expenseId: string) => {
+    try {
+      const { data: logsData, error: logsError } = await supabase
+        .from("audit_logs")
+        .select("user_id, action, comment, created_at")
+        .eq("expense_id", expenseId)
+        .order("created_at", { ascending: false });
+
+      if (logsError) throw logsError;
+
+      // Fetch user profiles for audit logs
+      const auditLogsWithNames = await Promise.all(
+        (logsData || []).map(async (log) => {
+          const { data: profileData } = await supabase
+            .from("profiles")
+            .select("name")
+            .eq("user_id", log.user_id)
+            .single();
+          
+          return {
+            ...log,
+            user_name: profileData?.name || "Unknown User"
+          };
+        })
+      );
+
+      setAuditLogs(auditLogsWithNames);
+    } catch (error) {
+      console.error("Error fetching audit logs:", error);
+      setAuditLogs([]);
+    }
+  };
+
   useEffect(() => {
     if (selectedExpense) {
       fetchAttachments(selectedExpense.id);
+      fetchAuditLogs(selectedExpense.id);
     } else {
       setAttachments([]);
+      setAuditLogs([]);
     }
   }, [selectedExpense]);
 
@@ -356,7 +392,7 @@ export default function AdminPanel() {
       
       toast({
         title: "Expense Assigned",
-        description: "The expense has been assigned to an engineer for review",
+        description: "The expense has been assigned to a manager for review",
       });
 
       setSelectedExpense(null);
@@ -494,7 +530,7 @@ export default function AdminPanel() {
           await ExpenseService.assignToEngineer(selectedExpense.id, selectedEngineer, user.id);
           toast({
             title: "Expense Assigned",
-            description: "The expense has been assigned to an engineer for review",
+            description: "The expense has been assigned to a manager for review",
           });
         } else {
           // Just update the status without assigning to engineer
@@ -638,8 +674,9 @@ export default function AdminPanel() {
 
   const exportExpenses = () => {
     const csvContent = [
-      ["Employee", "Email", "Title", "Destination", "Amount (INR)", "Status", "Created Date"],
+      ["Transaction #", "Employee", "Email", "Title", "Destination", "Amount (INR)", "Status", "Created Date"],
       ...filteredExpenses.map(expense => [
+        escapeCSV((expense as any).transaction_number || ''),
         escapeCSV(expense.user_name),
         escapeCSV(expense.user_email),
         escapeCSV(expense.title),
@@ -858,6 +895,7 @@ export default function AdminPanel() {
                     <Table className="min-w-full">
                     <TableHeader>
                       <TableRow className="border-gray-200">
+                          <TableHead className="font-semibold min-w-[80px] whitespace-nowrap">Txn #</TableHead>
                           <TableHead className="font-semibold min-w-[140px] sm:min-w-[140px]">Employee / Title</TableHead>
                           <TableHead className="font-semibold min-w-[100px] hidden sm:table-cell">Title</TableHead>
                           <TableHead className="font-semibold min-w-[100px] hidden sm:table-cell">Destination</TableHead>
@@ -871,6 +909,9 @@ export default function AdminPanel() {
                     <TableBody>
                       {filteredExpenses.map((expense) => (
                       <TableRow key={expense.id}>
+                        <TableCell className="text-xs sm:text-sm font-mono font-semibold text-blue-600 whitespace-nowrap">
+                          {(expense as any).transaction_number || '-'}
+                        </TableCell>
                         <TableCell className="text-xs sm:text-sm">
                           <div>
                             <div className="font-medium truncate">{expense.user_name}</div>
@@ -1068,6 +1109,49 @@ export default function AdminPanel() {
                                             </Button>
                                           </div>
                                         ))}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* Expense Timeline */}
+                                  {auditLogs.length > 0 && (
+                                    <div className="space-y-2 border-t pt-4 mt-4">
+                                      <label className="text-sm font-medium">Expense Timeline</label>
+                                      <div className="space-y-3 mt-2">
+                                        {auditLogs.map((log, index) => {
+                                          const isApproved = log.action.toLowerCase().includes('approved');
+                                          const isVerified = log.action.toLowerCase().includes('verified');
+                                          
+                                          return (
+                                            <div key={index} className="flex gap-3">
+                                              <div className="flex flex-col items-center">
+                                                <div className={`w-2 h-2 rounded-full ${isApproved ? 'bg-green-600' : isVerified ? 'bg-blue-600' : 'bg-gray-600'}`}></div>
+                                                {index < auditLogs.length - 1 && (
+                                                  <div className="w-px h-8 bg-gray-300 mt-2"></div>
+                                                )}
+                                              </div>
+                                              <div className="flex-1 space-y-1">
+                                                <p className="text-sm font-medium">{log.action.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())}</p>
+                                                {log.comment && (
+                                                  <p className="text-xs text-muted-foreground">{log.comment}</p>
+                                                )}
+                                                <div className={`text-sm ${isApproved || isVerified ? 'text-blue-700 font-semibold' : 'text-gray-600'}`}>
+                                                  {isApproved || isVerified ? (
+                                                    <span>
+                                                      <span className="font-bold text-base">Approved by: </span>
+                                                      <span className="font-bold text-base text-blue-800">{log.user_name}</span>
+                                                      <span className="text-gray-500"> • {format(new Date(log.created_at), "MMM d, h:mm a")}</span>
+                                                    </span>
+                                                  ) : (
+                                                    <span>
+                                                      by {log.user_name} • {format(new Date(log.created_at), "MMM d, h:mm a")}
+                                                    </span>
+                                                  )}
+                                                </div>
+                                              </div>
+                                            </div>
+                                          );
+                                        })}
                                       </div>
                                     </div>
                                   )}
