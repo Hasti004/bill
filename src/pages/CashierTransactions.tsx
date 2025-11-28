@@ -122,8 +122,11 @@ export default function CashierTransactions() {
 
       // Always set assignments, even if empty
       if (assignments && assignments.length > 0) {
+        // Type assertion to ensure proper typing
+        const typedAssignments = assignments as any[];
+        
         // Fetch recipient names
-        const recipientIds = [...new Set(assignments.map(a => a.recipient_id))];
+        const recipientIds = [...new Set(typedAssignments.map(a => a.recipient_id))];
         console.log("Recipient IDs to fetch names for:", recipientIds);
         
         const { data: profiles, error: profilesError } = await supabase
@@ -136,10 +139,15 @@ export default function CashierTransactions() {
         }
 
         const nameMap = new Map(profiles?.map(p => [p.user_id, p.name]) || []);
-        const assignmentsWithNames = assignments.map(a => ({
-          ...a,
+        const assignmentsWithNames: MoneyAssignment[] = typedAssignments.map(a => ({
+          id: a.id,
+          recipient_id: a.recipient_id,
           recipient_name: nameMap.get(a.recipient_id) || "Unknown",
           amount: Number(a.amount),
+          assigned_at: a.assigned_at,
+          is_returned: a.is_returned || false,
+          returned_at: a.returned_at || undefined,
+          return_transaction_id: a.return_transaction_id || undefined,
         }));
         console.log("Assignments with names:", assignmentsWithNames);
         setMoneyAssignments(assignmentsWithNames);
@@ -173,8 +181,11 @@ export default function CashierTransactions() {
         throw error;
       }
 
+      // Type assertion to ensure proper typing
+      const typedRequests = (requests || []) as any[];
+
       // Fetch requester names
-      const requesterIds = [...new Set(requests?.map(r => r.requester_id) || [])];
+      const requesterIds = [...new Set(typedRequests.map(r => r.requester_id))];
       if (requesterIds.length > 0) {
         const { data: profiles } = await supabase
           .from("profiles")
@@ -182,10 +193,16 @@ export default function CashierTransactions() {
           .in("user_id", requesterIds);
 
         const nameMap = new Map(profiles?.map(p => [p.user_id, p.name]) || []);
-        const requestsWithNames = (requests || []).map(r => ({
-          ...r,
+        const requestsWithNames: MoneyReturnRequest[] = typedRequests.map(r => ({
+          id: r.id,
+          requester_id: r.requester_id,
           requester_name: nameMap.get(r.requester_id) || "Unknown",
           amount: Number(r.amount),
+          status: r.status as "pending" | "approved" | "rejected",
+          requested_at: r.requested_at,
+          approved_at: r.approved_at || undefined,
+          rejected_at: r.rejected_at || undefined,
+          rejection_reason: r.rejection_reason || undefined,
         }));
         setReturnRequests(requestsWithNames);
       } else {

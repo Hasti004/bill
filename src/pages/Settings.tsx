@@ -461,49 +461,49 @@ export default function Settings() {
       {/* Admin Settings - Only for admins */}
       {userRole === "admin" && (
         <>
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <SettingsIcon className="h-5 w-5" />
-                <CardTitle>Admin Settings</CardTitle>
-              </div>
-              <CardDescription>
-                Configure system-wide settings (Admin only)
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {loading ? (
-                <p className="text-muted-foreground">Loading settings...</p>
-              ) : (
-                <>
-                  <div className="space-y-2">
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <SettingsIcon className="h-5 w-5" />
+              <CardTitle>Admin Settings</CardTitle>
+            </div>
+            <CardDescription>
+              Configure system-wide settings (Admin only)
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {loading ? (
+              <p className="text-muted-foreground">Loading settings...</p>
+            ) : (
+              <>
+                <div className="space-y-2">
                     <Label htmlFor="approval-limit">Manager Approval Limit (₹)</Label>
-                    <Input
-                      id="approval-limit"
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={engineerApprovalLimit}
-                      onChange={(e) => setEngineerApprovalLimit(e.target.value)}
-                      placeholder="50000"
-                      className="max-w-xs"
-                    />
+                  <Input
+                    id="approval-limit"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={engineerApprovalLimit}
+                    onChange={(e) => setEngineerApprovalLimit(e.target.value)}
+                    placeholder="50000"
+                    className="max-w-xs"
+                  />
                   <p className="text-sm text-muted-foreground">
                     Expenses below {formatINR(parseFloat(engineerApprovalLimit) || 0)} can be approved directly by managers.
                     Expenses at or above this limit must be verified by managers and then approved by administrators.
                   </p>
-                  </div>
+                </div>
 
-                  <div className="flex gap-2">
-                    <Button onClick={saveSettings} disabled={saving}>
-                      <Save className="h-4 w-4 mr-2" />
-                      {saving ? "Saving..." : "Save Settings"}
-                    </Button>
-                  </div>
-                </>
-              )}
-            </CardContent>
-          </Card>
+                <div className="flex gap-2">
+                  <Button onClick={saveSettings} disabled={saving}>
+                    <Save className="h-4 w-4 mr-2" />
+                    {saving ? "Saving..." : "Save Settings"}
+                  </Button>
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
 
           {/* Location Management */}
           <Card>

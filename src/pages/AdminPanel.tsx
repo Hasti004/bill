@@ -673,28 +673,78 @@ export default function AdminPanel() {
     return str;
   };
 
-  const exportExpenses = () => {
-    const csvContent = [
-      ["Transaction #", "Employee", "Email", "Title", "Destination", "Amount (INR)", "Status", "Created Date"],
-      ...filteredExpenses.map(expense => [
-        escapeCSV((expense as any).transaction_number || ''),
-        escapeCSV(expense.user_name),
-        escapeCSV(expense.user_email),
-        escapeCSV(expense.title),
-        escapeCSV(expense.destination),
-        Number(expense.total_amount).toFixed(2), // Raw number without formatting
-        escapeCSV(expense.status),
-        format(new Date(expense.created_at), "yyyy-MM-dd") // Clean date format
-      ])
-    ].map(row => row.join(",")).join("\n");
+  const exportExpenses = async () => {
+    try {
+      // Fetch location data for all employees
+      const userIds = [...new Set(filteredExpenses.map(e => e.user_id))];
+      
+      // Get employee profiles with their reporting engineers
+      const { data: employeeProfiles, error: profilesError } = await supabase
+        .from("profiles")
+        .select("user_id, reporting_engineer_id")
+        .in("user_id", userIds);
+      
+      if (profilesError) throw profilesError;
+      
+      // Get all engineer IDs
+      const engineerIds = [...new Set((employeeProfiles || [])
+        .map(p => p.reporting_engineer_id)
+        .filter(id => id !== null && id !== undefined))];
+      
+      // Get engineer locations
+      const { data: engineerLocations, error: locationsError } = await supabase
+        .from("engineer_locations")
+        .select("engineer_id, location_id, locations(name)")
+        .in("engineer_id", engineerIds);
+      
+      if (locationsError) throw locationsError;
+      
+      // Build a map: employee_id -> location_name
+      const employeeToLocation: Record<string, string> = {};
+      (employeeProfiles || []).forEach(profile => {
+        if (profile.reporting_engineer_id) {
+          const engineerLocation = engineerLocations?.find(
+            el => el.engineer_id === profile.reporting_engineer_id
+          );
+          if (engineerLocation && engineerLocation.locations) {
+            employeeToLocation[profile.user_id] = (engineerLocation.locations as any).name || "Unassigned";
+          } else {
+            employeeToLocation[profile.user_id] = "Unassigned";
+          }
+        } else {
+          employeeToLocation[profile.user_id] = "Unassigned";
+        }
+      });
+      
+      // Build CSV with all requested fields
+      const csvContent = [
+        ["Date", "Category", "Amount", "Petty Check", "Transaction ID", "Employee Name", "Location"],
+        ...filteredExpenses.map(expense => [
+          format(new Date(expense.created_at), "yyyy-MM-dd"), // Date of transaction
+          escapeCSV((expense as any).category || "N/A"), // Category
+          Number(expense.total_amount).toFixed(2), // Amount
+          "", // Petty Check (empty for now - can be filled manually or based on status)
+          escapeCSV((expense as any).transaction_number || ''), // Transaction ID
+          escapeCSV(expense.user_name), // Employee name
+          escapeCSV(employeeToLocation[expense.user_id] || "Unassigned") // Location
+        ])
+      ].map(row => row.join(",")).join("\n");
 
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `expenses-${format(new Date(), "yyyy-MM-dd")}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `expenses-${format(new Date(), "yyyy-MM-dd")}.csv`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Error exporting expenses:", error);
+      toast({
+        variant: "destructive",
+        title: "Export Failed",
+        description: "Failed to export expenses. Please try again.",
+      });
+    }
   };
 
 

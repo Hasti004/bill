@@ -326,6 +326,11 @@ export default function Dashboard() {
       let pendingApprovals = 0;
       let pendingApprovalsAmount = 0;
       
+      // Initialize balance totals (for admin only)
+      let totalEmployeeBalance = 0;
+      let totalEngineerBalance = 0;
+      let totalCashierBalance = 0;
+      
       if (userRole === "admin") {
         // Fetch expenses that need admin approval:
         // 1. Verified expenses (need admin approval)
@@ -363,10 +368,6 @@ export default function Dashboard() {
         }
 
         // Fetch total balances for employees, engineers, and cashiers (only for admin)
-        let totalEmployeeBalance = 0;
-        let totalEngineerBalance = 0;
-        let totalCashierBalance = 0;
-
         try {
           // Get all user roles
           const { data: allRoles, error: rolesError } = await supabase
@@ -654,16 +655,17 @@ export default function Dashboard() {
           managerId = user.id;
         }
 
-        // Find cashier assigned to this manager
-        // First get all profiles with cashier_assigned_engineer_id matching the manager
-        const { data: cashierProfiles, error: cashierError } = await supabase
-          .from("profiles")
-          .select("user_id")
-          .eq("cashier_assigned_engineer_id", managerId);
+        // Find cashier assigned to this manager using location-based or direct assignment
+        // This function prioritizes location-based assignment and falls back to direct assignment
+        const { data: cashierUserId, error: cashierError } = await supabase
+          .rpc('get_cashier_for_engineer', { engineer_user_id: managerId });
 
-        if (cashierError) throw cashierError;
+        if (cashierError) {
+          console.error("Error finding cashier:", cashierError);
+          throw cashierError;
+        }
 
-        if (!cashierProfiles || cashierProfiles.length === 0) {
+        if (!cashierUserId) {
           toast({
             variant: "destructive",
             title: "No Cashier Assigned",
@@ -673,29 +675,7 @@ export default function Dashboard() {
           return;
         }
 
-        // Filter to find which of these users has the cashier role
-        const cashierUserIds = cashierProfiles.map(p => p.user_id);
-        const { data: cashierRoles, error: rolesError } = await supabase
-          .from("user_roles")
-          .select("user_id")
-          .in("user_id", cashierUserIds)
-          .eq("role", "cashier")
-          .limit(1)
-          .maybeSingle();
-
-        if (rolesError) throw rolesError;
-
-        if (!cashierRoles?.user_id) {
-          toast({
-            variant: "destructive",
-            title: "No Cashier Assigned",
-            description: "Your manager doesn't have a cashier assigned. Please contact an administrator.",
-          });
-          setReturningMoney(false);
-          return;
-        }
-
-        targetUserId = cashierRoles.user_id;
+        targetUserId = cashierUserId;
       } else {
         toast({
           variant: "destructive",

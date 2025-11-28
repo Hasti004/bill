@@ -247,7 +247,7 @@ export function FileUpload({
         {/* Upload Area */}
         <div className="border-2 border-dashed border-muted-foreground/25 rounded-lg p-6 text-center">
           {/* Regular file input for desktop */}
-          <input
+                <input
             ref={fileInputRef}
             type="file"
             multiple
@@ -290,14 +290,14 @@ export function FileUpload({
                 </Button>
               )}
             </div>
-            <p className="text-sm text-muted-foreground mt-2">
+              <p className="text-sm text-muted-foreground mt-2">
               {isMobile ? "Take a photo or choose from files" : "or drag and drop bill photos here"}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              PNG, JPG only (max 10MB each)
-              {required && (
-                <span className="text-red-500 font-medium"> * Required for submission</span>
-              )}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                PNG, JPG only (max 10MB each)
+                {required && (
+                  <span className="text-red-500 font-medium"> * Required for submission</span>
+                )}
             </p>
           </div>
 

@@ -193,6 +193,10 @@ export type Database = {
           name: string
           updated_at: string | null
           user_id: string
+          reporting_engineer_id: string | null
+          cashier_assigned_engineer_id: string | null
+          assigned_cashier_id: string | null
+          cashier_assigned_location_id: string | null
         }
         Insert: {
           created_at?: string | null
@@ -203,6 +207,10 @@ export type Database = {
           name: string
           updated_at?: string | null
           user_id: string
+          reporting_engineer_id?: string | null
+          cashier_assigned_engineer_id?: string | null
+          assigned_cashier_id?: string | null
+          cashier_assigned_location_id?: string | null
         }
         Update: {
           created_at?: string | null
@@ -213,6 +221,10 @@ export type Database = {
           name?: string
           updated_at?: string | null
           user_id?: string
+          reporting_engineer_id?: string | null
+          cashier_assigned_engineer_id?: string | null
+          assigned_cashier_id?: string | null
+          cashier_assigned_location_id?: string | null
         }
         Relationships: []
       }
@@ -237,6 +249,224 @@ export type Database = {
         }
         Relationships: []
       }
+      locations: {
+        Row: {
+          id: string
+          name: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      engineer_locations: {
+        Row: {
+          id: string
+          engineer_id: string
+          location_id: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          engineer_id: string
+          location_id: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          engineer_id?: string
+          location_id?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "engineer_locations_engineer_id_fkey"
+            columns: ["engineer_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "engineer_locations_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notifications: {
+        Row: {
+          id: string
+          user_id: string
+          type: string
+          title: string
+          message: string
+          expense_id: string | null
+          read: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          type: string
+          title: string
+          message: string
+          expense_id?: string | null
+          read?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          type?: string
+          title?: string
+          message?: string
+          expense_id?: string | null
+          read?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notifications_expense_id_fkey"
+            columns: ["expense_id"]
+            isOneToOne: false
+            referencedRelation: "expenses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      money_assignments: {
+        Row: {
+          id: string
+          cashier_id: string
+          recipient_id: string
+          amount: number
+          assigned_at: string
+          returned_at: string | null
+          is_returned: boolean
+          return_transaction_id: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          cashier_id: string
+          recipient_id: string
+          amount: number
+          assigned_at?: string
+          returned_at?: string | null
+          is_returned?: boolean
+          return_transaction_id?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          cashier_id?: string
+          recipient_id?: string
+          amount?: number
+          assigned_at?: string
+          returned_at?: string | null
+          is_returned?: boolean
+          return_transaction_id?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "money_assignments_cashier_id_fkey"
+            columns: ["cashier_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "money_assignments_recipient_id_fkey"
+            columns: ["recipient_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      money_return_requests: {
+        Row: {
+          id: string
+          requester_id: string
+          cashier_id: string
+          amount: number
+          status: string
+          requested_at: string
+          approved_at: string | null
+          rejected_at: string | null
+          approved_by: string | null
+          rejected_by: string | null
+          rejection_reason: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          requester_id: string
+          cashier_id: string
+          amount: number
+          status?: string
+          requested_at?: string
+          approved_at?: string | null
+          rejected_at?: string | null
+          approved_by?: string | null
+          rejected_by?: string | null
+          rejection_reason?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          requester_id?: string
+          cashier_id?: string
+          amount?: number
+          status?: string
+          requested_at?: string
+          approved_at?: string | null
+          rejected_at?: string | null
+          approved_by?: string | null
+          rejected_by?: string | null
+          rejection_reason?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "money_return_requests_requester_id_fkey"
+            columns: ["requester_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "money_return_requests_cashier_id_fkey"
+            columns: ["cashier_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -248,6 +478,18 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      sync_engineers_with_location_cashier: {
+        Args: {
+          location_id_param: string
+        }
+        Returns: undefined
+      }
+      get_cashier_for_engineer: {
+        Args: {
+          engineer_user_id: string
+        }
+        Returns: string | null
       }
     }
     Enums: {

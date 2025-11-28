@@ -264,36 +264,21 @@ export default function Expenses() {
           managerId = user.id;
         }
 
-        // Find cashier assigned to this manager
-        // First get all profiles with cashier_assigned_engineer_id matching the manager
-        const { data: cashierProfiles, error: cashierError } = await supabase
-          .from("profiles")
-          .select("user_id")
-          .eq("cashier_assigned_engineer_id", managerId);
+        // Find cashier assigned to this manager using location-based or direct assignment
+        // This function prioritizes location-based assignment and falls back to direct assignment
+        const { data: cashierUserId, error: cashierError } = await supabase
+          .rpc('get_cashier_for_engineer', { engineer_user_id: managerId });
 
-        if (cashierError) throw cashierError;
+        if (cashierError) {
+          console.error("Error finding cashier:", cashierError);
+          throw cashierError;
+        }
 
-        if (!cashierProfiles || cashierProfiles.length === 0) {
+        if (!cashierUserId) {
           throw new Error("Your manager doesn't have a cashier assigned. Please contact an administrator.");
         }
 
-        // Filter to find which of these users has the cashier role
-        const cashierUserIds = cashierProfiles.map(p => p.user_id);
-        const { data: cashierRoles, error: rolesError } = await supabase
-          .from("user_roles")
-          .select("user_id")
-          .in("user_id", cashierUserIds)
-          .eq("role", "cashier")
-          .limit(1)
-          .maybeSingle();
-
-        if (rolesError) throw rolesError;
-
-        if (!cashierRoles?.user_id) {
-          throw new Error("Your manager doesn't have a cashier assigned. Please contact an administrator.");
-        }
-
-        targetUserId = cashierRoles.user_id;
+        targetUserId = cashierUserId;
       } else if (userRole === "cashier") {
         targetRole = "admin";
         

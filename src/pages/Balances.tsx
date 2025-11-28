@@ -208,18 +208,52 @@ export default function Balances() {
         };
       });
       
-      // Filter for cashiers: only show employees under their assigned engineer
+      // Filter for cashiers: show employees based on location assignment (prioritized) or direct engineer assignment
       if (userRole === 'cashier' && user?.id) {
-        // Get cashier's assigned engineer from the database directly
+        // Get cashier's assignment from the database directly
         const { data: cashierProfileData } = await supabase
           .from("profiles")
-          .select("cashier_assigned_engineer_id")
+          .select("cashier_assigned_engineer_id, cashier_assigned_location_id")
           .eq("user_id", user.id)
           .single();
         
         const cashierAssignedEngineerId = cashierProfileData?.cashier_assigned_engineer_id;
+        const cashierAssignedLocationId = cashierProfileData?.cashier_assigned_location_id;
         
-        if (cashierAssignedEngineerId) {
+        if (cashierAssignedLocationId) {
+          // Location-based assignment: show all engineers and employees in this location
+          console.log('Filtering data for cashier with assigned location:', cashierAssignedLocationId);
+          
+          // Get all engineer IDs in this location
+          const { data: locationEngineers } = await supabase
+            .from("engineer_locations")
+            .select("engineer_id")
+            .eq("location_id", cashierAssignedLocationId);
+          
+          const locationEngineerIds = new Set((locationEngineers || []).map((le: any) => le.engineer_id));
+          
+          combinedData = combinedData.filter((row: any) => {
+            // Show ONLY:
+            // 1. The cashier themselves
+            // 2. All engineers in the assigned location
+            // 3. All employees under those engineers
+            // DO NOT show: Admins, other cashiers, engineers/employees from other locations
+            
+            // Show cashier themselves
+            if (row.user_id === user.id) return true;
+            
+            // Show engineers in the assigned location
+            if (row.role === 'engineer' && locationEngineerIds.has(row.user_id)) return true;
+            
+            // Show employees under engineers in the assigned location
+            if (row.role === 'employee' && row.reporting_engineer_id && locationEngineerIds.has(row.reporting_engineer_id)) return true;
+            
+            // Hide everything else
+            return false;
+          });
+          console.log('Filtered data for location-based cashier:', combinedData.length, 'rows');
+        } else if (cashierAssignedEngineerId) {
+          // Direct engineer assignment (fallback)
           console.log('Filtering data for cashier with assigned engineer:', cashierAssignedEngineerId);
           combinedData = combinedData.filter((row: any) => {
             // Show ONLY:
@@ -242,8 +276,8 @@ export default function Balances() {
           });
           console.log('Filtered data for cashier:', combinedData.length, 'rows');
         } else {
-          // If cashier has no assigned engineer, show all (backward compatibility)
-          console.log('Cashier has no assigned engineer - showing all users');
+          // If cashier has no assignment, show all (backward compatibility)
+          console.log('Cashier has no assignment - showing all users');
         }
       }
       
@@ -404,21 +438,21 @@ export default function Balances() {
           });
           
           const { data: insertedData, error: assignmentError } = await supabase
-            .from("money_assignments")
-            .insert({
-              cashier_id: user.id,
-              recipient_id: userId,
-              amount: amountToAdd,
+              .from("money_assignments")
+              .insert({
+                cashier_id: user.id,
+                recipient_id: userId,
+                amount: amountToAdd,
             })
             .select();
 
-          if (assignmentError) {
-            console.error('Error recording money assignment:', assignmentError);
-            // Don't throw error - assignment recording is not critical for the transaction
-            // But log it for debugging
-          } else {
+            if (assignmentError) {
+              console.error('Error recording money assignment:', assignmentError);
+              // Don't throw error - assignment recording is not critical for the transaction
+              // But log it for debugging
+            } else {
             console.log('Money assignment recorded successfully:', insertedData);
-            console.log('Money assignment recorded: cashier', user.id, '-> employee', userId, 'amount:', amountToAdd);
+              console.log('Money assignment recorded: cashier', user.id, '-> employee', userId, 'amount:', amountToAdd);
           }
         }
       }

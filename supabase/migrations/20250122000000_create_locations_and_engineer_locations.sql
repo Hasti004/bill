@@ -25,6 +25,12 @@ ALTER TABLE public.locations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.engineer_locations ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies for locations table
+-- Drop existing policies if they exist
+DROP POLICY IF EXISTS "Allow authenticated users to read locations" ON public.locations;
+DROP POLICY IF EXISTS "Only admins can insert locations" ON public.locations;
+DROP POLICY IF EXISTS "Only admins can update locations" ON public.locations;
+DROP POLICY IF EXISTS "Only admins can delete locations" ON public.locations;
+
 -- Allow all authenticated users to read locations
 CREATE POLICY "Allow authenticated users to read locations"
   ON public.locations
@@ -69,6 +75,12 @@ CREATE POLICY "Only admins can delete locations"
   );
 
 -- RLS Policies for engineer_locations table
+-- Drop existing policies if they exist
+DROP POLICY IF EXISTS "Allow authenticated users to read engineer_locations" ON public.engineer_locations;
+DROP POLICY IF EXISTS "Only admins can insert engineer_locations" ON public.engineer_locations;
+DROP POLICY IF EXISTS "Only admins can update engineer_locations" ON public.engineer_locations;
+DROP POLICY IF EXISTS "Only admins can delete engineer_locations" ON public.engineer_locations;
+
 -- Allow all authenticated users to read engineer_locations
 CREATE POLICY "Allow authenticated users to read engineer_locations"
   ON public.engineer_locations

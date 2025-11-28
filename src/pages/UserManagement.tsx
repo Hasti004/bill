@@ -15,6 +15,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { formatINR } from "@/lib/format";
@@ -33,8 +34,9 @@ interface CreateUserForm {
   password: string;
   reportingEngineerId?: string | "none";
   cashierAssignedEngineerId?: string | "none";
+  cashierAssignedLocationId?: string | "none";
   assignedCashierId?: string | "none";
-  locationIds?: string[];
+  locationId?: string | "none";
 }
 
 export default function UserManagement() {
@@ -45,9 +47,9 @@ export default function UserManagement() {
   const [listLoading, setListLoading] = useState(false);
   const [engineers, setEngineers] = useState<{ id: string; name: string; email: string }[]>([]);
   const [cashiers, setCashiers] = useState<{ id: string; name: string; email: string }[]>([]);
-  const [users, setUsers] = useState<{ user_id: string; name: string; email: string; balance: number; role: string; assigned_engineer_name?: string; cashier_assigned_engineer_name?: string; assigned_cashier_name?: string; cashier_assigned_engineer_id?: string; reporting_engineer_id?: string }[]>([]);
+  const [users, setUsers] = useState<{ user_id: string; name: string; email: string; balance: number; role: string; assigned_engineer_name?: string; cashier_assigned_engineer_name?: string; cashier_assigned_location_id?: string; assigned_cashier_name?: string; cashier_assigned_engineer_id?: string; reporting_engineer_id?: string }[]>([]);
   const [locations, setLocations] = useState<{ id: string; name: string }[]>([]);
-  const [engineerLocations, setEngineerLocations] = useState<Record<string, string[]>>({}); // engineer_id -> location_ids[]
+  const [engineerLocations, setEngineerLocations] = useState<Record<string, string>>({}); // engineer_id -> location_id (single location only)
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<{ user_id: string; name: string; email: string; balance: number; role: string } | null>(null);
   const [expensesLoading, setExpensesLoading] = useState(false);
@@ -61,20 +63,22 @@ export default function UserManagement() {
     password: "",
     reportingEngineerId: "none",
     cashierAssignedEngineerId: "none",
-    locationIds: [],
+    cashierAssignedLocationId: "none",
+    locationId: "none",
   });
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [userToEdit, setUserToEdit] = useState<{ user_id: string; name: string; email: string; balance: number; role: string } | null>(null);
   const [userToDelete, setUserToDelete] = useState<{ user_id: string; name: string; email: string } | null>(null);
-  const [editFormData, setEditFormData] = useState<{ name: string; email: string; role: "admin" | "engineer" | "employee" | "cashier"; reportingEngineerId: string; cashierAssignedEngineerId: string; assignedCashierId: string; locationIds: string[] }>({
+  const [editFormData, setEditFormData] = useState<{ name: string; email: string; role: "admin" | "engineer" | "employee" | "cashier"; reportingEngineerId: string; cashierAssignedEngineerId: string; cashierAssignedLocationId: string; assignedCashierId: string; locationId: string }>({
     name: "",
     email: "",
     role: "employee",
     reportingEngineerId: "none",
     cashierAssignedEngineerId: "none",
+    cashierAssignedLocationId: "none",
     assignedCashierId: "none",
-    locationIds: [],
+    locationId: "none",
   });
   const [updating, setUpdating] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -150,12 +154,12 @@ export default function UserManagement() {
           .select("engineer_id, location_id");
         if (error) throw error;
         
-        const assignments: Record<string, string[]> = {};
+        const assignments: Record<string, string> = {};
         (data || []).forEach((el: any) => {
+          // Only store the first location for each engineer (one location per engineer)
           if (!assignments[el.engineer_id]) {
-            assignments[el.engineer_id] = [];
+            assignments[el.engineer_id] = el.location_id;
           }
-          assignments[el.engineer_id].push(el.location_id);
         });
         setEngineerLocations(assignments);
       } catch (e) {
@@ -168,10 +172,10 @@ export default function UserManagement() {
     const loadUsers = async () => {
       try {
         setListLoading(true);
-        // fetch profiles with reporting_engineer_id, cashier_assigned_engineer_id, and assigned_cashier_id
+        // fetch profiles with reporting_engineer_id, cashier_assigned_engineer_id, cashier_assigned_location_id, and assigned_cashier_id
         const { data: profiles, error: profilesError } = await supabase
           .from("profiles")
-          .select("user_id, name, email, balance, reporting_engineer_id, cashier_assigned_engineer_id, assigned_cashier_id");
+          .select("user_id, name, email, balance, reporting_engineer_id, cashier_assigned_engineer_id, cashier_assigned_location_id, assigned_cashier_id");
         if (profilesError) throw profilesError;
 
         const ids = (profiles || []).map(p => p.user_id);
@@ -242,6 +246,7 @@ export default function UserManagement() {
           cashier_assigned_engineer_name: (p as any).cashier_assigned_engineer_id
             ? engineerNamesById[(p as any).cashier_assigned_engineer_id] || "Unknown"
             : undefined,
+          cashier_assigned_location_id: (p as any).cashier_assigned_location_id || undefined,
           assigned_cashier_name: (p as any).assigned_cashier_id
             ? cashierNamesById[(p as any).assigned_cashier_id] || "Unknown"
             : undefined,
@@ -291,16 +296,32 @@ export default function UserManagement() {
     }> = [];
     
     engineerUsers.forEach(engineer => {
-      // Get locations for this engineer
-      const engineerLocationIds = engineerLocations[engineer.user_id] || [];
+      // Get location for this engineer (single location only)
+      const engineerLocationId = engineerLocations[engineer.user_id];
       
-      // Get cashiers assigned to this engineer (match by engineer user_id for accuracy)
-      // Ensure only one cashier per engineer - enforce the one-to-one relationship
-      const allCashiers = users.filter(u => 
-        u.role === "cashier" && 
-        (u.cashier_assigned_engineer_id === engineer.user_id || 
-         (u.cashier_assigned_engineer_id === undefined && u.cashier_assigned_engineer_name === engineer.name))
-      );
+      // Get cashiers assigned to this engineer
+      // Priority: Location-based assignment > Direct engineer assignment
+      const allCashiers: typeof users = [];
+      
+      // First, check for location-based cashier assignment
+      if (engineerLocationId) {
+        const locationCashiers = users.filter(u => 
+          u.role === "cashier" && 
+          u.cashier_assigned_location_id === engineerLocationId
+        );
+        allCashiers.push(...locationCashiers);
+      }
+      
+      // If no location-based cashier found, check for direct engineer assignment
+      if (allCashiers.length === 0) {
+        const directCashiers = users.filter(u => 
+          u.role === "cashier" && 
+          (u.cashier_assigned_engineer_id === engineer.user_id || 
+           (u.cashier_assigned_engineer_id === undefined && u.cashier_assigned_engineer_name === engineer.name))
+        );
+        allCashiers.push(...directCashiers);
+      }
+      
       // Deduplicate by user_id and take only the first one (enforce one cashier per engineer)
       const cashiers = allCashiers.filter((cashier, index, self) => 
         index === self.findIndex(c => c.user_id === cashier.user_id)
@@ -322,29 +343,49 @@ export default function UserManagement() {
         employees: employees,
       };
       
-      if (engineerLocationIds.length === 0) {
-        // Engineer has no locations assigned
+      if (!engineerLocationId) {
+        // Engineer has no location assigned
         unassignedEngineers.push(engineerData);
       } else {
-        // Add engineer to each of their locations
-        engineerLocationIds.forEach(locationId => {
-          if (!locationHierarchy[locationId]) {
-            locationHierarchy[locationId] = [];
-          }
-          locationHierarchy[locationId].push(engineerData);
-        });
+        // Add engineer to their location
+        if (!locationHierarchy[engineerLocationId]) {
+          locationHierarchy[engineerLocationId] = [];
+        }
+        locationHierarchy[engineerLocationId].push(engineerData);
       }
     });
     
+    // Get location-based cashiers (cashiers assigned to locations)
+    const locationCashiers: Record<string, typeof users> = {}; // location_id -> cashiers[]
+    users.filter(u => u.role === "cashier" && u.cashier_assigned_location_id).forEach(cashier => {
+      const locationId = cashier.cashier_assigned_location_id!;
+      if (!locationCashiers[locationId]) {
+        locationCashiers[locationId] = [];
+      }
+      locationCashiers[locationId].push(cashier);
+    });
+    
     // Convert location hierarchy to array format with location names
-    const hierarchyByLocation = locations.map(location => ({
-      location: location,
-      engineers: locationHierarchy[location.id] || [],
-    })).filter(loc => loc.engineers.length > 0); // Only show locations with engineers
+    const hierarchyByLocation = locations.map(location => {
+      const engineers = locationHierarchy[location.id] || [];
+      // For each engineer, remove location-based cashiers from their individual cashier list
+      // since they'll be shown at the location level instead
+      const locationCashierIds = new Set((locationCashiers[location.id] || []).map(c => c.user_id));
+      const engineersWithoutLocationCashiers = engineers.map(engData => ({
+        ...engData,
+        cashiers: engData.cashiers.filter(c => !locationCashierIds.has(c.user_id)),
+      }));
+      
+      return {
+        location: location,
+        cashiers: locationCashiers[location.id] || [], // Show location-based cashiers at location level
+        engineers: engineersWithoutLocationCashiers,
+      };
+    }).filter(loc => loc.engineers.length > 0 || loc.cashiers.length > 0); // Show locations with engineers or cashiers
     
     // Also include unassigned users
     const unassignedCashiers = users.filter(u => 
-      u.role === "cashier" && !u.cashier_assigned_engineer_name
+      u.role === "cashier" && !u.cashier_assigned_engineer_name && !u.cashier_assigned_location_id
     );
     const unassignedEmployees = users.filter(u => 
       u.role === "employee" && !u.assigned_engineer_name
@@ -518,40 +559,88 @@ export default function UserManagement() {
         if (profileUpdateError) throw profileUpdateError;
       }
 
-      // If creating a cashier and an engineer is chosen, link them
-      // But only if the engineer doesn't already have a cashier
-      if (validated.role === "cashier" && formData.cashierAssignedEngineerId && formData.cashierAssignedEngineerId !== "none") {
-        // Check if engineer already has a cashier
-        const { data: existingCashier, error: checkError } = await supabase
-          .from("profiles")
-          .select("user_id")
-          .eq("cashier_assigned_engineer_id", formData.cashierAssignedEngineerId)
-          .limit(1);
+      // If creating a cashier, handle location or engineer assignment
+      if (validated.role === "cashier") {
+        const updateData: any = {};
+        
+        // Priority: Location assignment over direct engineer assignment
+        if (formData.cashierAssignedLocationId && formData.cashierAssignedLocationId !== "none") {
+          // Check if location already has a cashier
+          // First get all profiles with this location assigned
+          const { data: profilesWithLocation, error: profilesError } = await supabase
+            .from("profiles")
+            .select("user_id")
+            .eq("cashier_assigned_location_id", formData.cashierAssignedLocationId);
+          
+          if (profilesError) throw profilesError;
+          
+          // If any profiles have this location, check if they're cashiers
+          if (profilesWithLocation && profilesWithLocation.length > 0) {
+            const userIds = profilesWithLocation.map(p => p.user_id);
+            const { data: cashierRoles, error: rolesError } = await supabase
+              .from("user_roles")
+              .select("user_id")
+              .in("user_id", userIds)
+              .eq("role", "cashier");
+            
+            if (rolesError) throw rolesError;
+            
+            // Only throw error if we found an actual cashier
+            if (cashierRoles && cashierRoles.length > 0) {
+              throw new Error("This location already has a cashier assigned. Each location can only have one cashier.");
+            }
+          }
 
-        if (checkError) throw checkError;
+          updateData.cashier_assigned_location_id = formData.cashierAssignedLocationId;
+          updateData.cashier_assigned_engineer_id = null; // Clear direct assignment when using location
+        } else if (formData.cashierAssignedEngineerId && formData.cashierAssignedEngineerId !== "none") {
+          // Fallback to direct engineer assignment
+          // Check if engineer already has a cashier
+          const { data: existingCashier, error: checkError } = await supabase
+            .from("profiles")
+            .select("user_id")
+            .eq("cashier_assigned_engineer_id", formData.cashierAssignedEngineerId)
+            .limit(1);
 
-        if (existingCashier && existingCashier.length > 0) {
-          throw new Error("This engineer already has a cashier assigned. Each engineer can only have one cashier.");
+          if (checkError) throw checkError;
+
+          if (existingCashier && existingCashier.length > 0) {
+            throw new Error("This engineer already has a cashier assigned. Each engineer can only have one cashier.");
+          }
+
+          updateData.cashier_assigned_engineer_id = formData.cashierAssignedEngineerId;
+          updateData.cashier_assigned_location_id = null; // Clear location assignment when using direct
         }
 
-        const { error: profileUpdateError } = await supabase
-          .from("profiles")
-          .update({ cashier_assigned_engineer_id: formData.cashierAssignedEngineerId })
-          .eq("user_id", authData.user.id);
+        if (Object.keys(updateData).length > 0) {
+          const { error: profileUpdateError } = await supabase
+            .from("profiles")
+            .update(updateData)
+            .eq("user_id", authData.user.id);
 
-        if (profileUpdateError) throw profileUpdateError;
+          if (profileUpdateError) throw profileUpdateError;
+
+          // If location assignment, trigger sync of engineers
+          if (updateData.cashier_assigned_location_id) {
+            const { error: syncError } = await supabase.rpc('sync_engineers_with_location_cashier', {
+              location_id_param: updateData.cashier_assigned_location_id
+            });
+            if (syncError) {
+              console.error("Error syncing engineers with location cashier:", syncError);
+              // Don't throw - this is a background sync
+            }
+          }
+        }
       }
 
-      // If creating an engineer and locations are selected, assign them
-      if (validated.role === "engineer" && formData.locationIds && formData.locationIds.length > 0) {
-        const locationAssignments = formData.locationIds.map(locationId => ({
-          engineer_id: authData.user.id,
-          location_id: locationId,
-        }));
-
+      // If creating an engineer and a location is selected, assign it
+      if (validated.role === "engineer" && formData.locationId && formData.locationId !== "none") {
         const { error: locationError } = await supabase
           .from("engineer_locations")
-          .insert(locationAssignments);
+          .insert({
+            engineer_id: authData.user.id,
+            location_id: formData.locationId,
+          });
 
         if (locationError) throw locationError;
       }
@@ -569,7 +658,8 @@ export default function UserManagement() {
         password: "",
         reportingEngineerId: "none",
         cashierAssignedEngineerId: "none",
-        locationIds: [],
+        cashierAssignedLocationId: "none",
+        locationId: "none",
       });
       setShowPassword(false);
       
@@ -578,12 +668,12 @@ export default function UserManagement() {
         .from("engineer_locations")
         .select("engineer_id, location_id");
       if (!elError && elData) {
-        const assignments: Record<string, string[]> = {};
+        const assignments: Record<string, string> = {};
         elData.forEach((el: any) => {
+          // Only store the first location for each engineer (one location per engineer)
           if (!assignments[el.engineer_id]) {
-            assignments[el.engineer_id] = [];
+            assignments[el.engineer_id] = el.location_id;
           }
-          assignments[el.engineer_id].push(el.location_id);
         });
         setEngineerLocations(assignments);
       }
@@ -632,18 +722,20 @@ export default function UserManagement() {
       try {
         const { data } = await supabase
           .from("profiles")
-          .select("reporting_engineer_id, cashier_assigned_engineer_id, assigned_cashier_id")
+          .select("reporting_engineer_id, cashier_assigned_engineer_id, cashier_assigned_location_id, assigned_cashier_id")
           .eq("user_id", u.user_id)
           .single();
         
-        // Fetch locations for engineers
-        let locationIds: string[] = [];
+        // Fetch location for engineer (only one location allowed)
+        let locationId: string = "none";
         if (u.role === "engineer") {
           const { data: locationData } = await supabase
             .from("engineer_locations")
             .select("location_id")
-            .eq("engineer_id", u.user_id);
-          locationIds = (locationData || []).map((l: any) => l.location_id);
+            .eq("engineer_id", u.user_id)
+            .limit(1)
+            .maybeSingle();
+          locationId = locationData?.location_id || "none";
         }
         
         setEditFormData({
@@ -652,8 +744,9 @@ export default function UserManagement() {
           role: u.role as "admin" | "engineer" | "employee" | "cashier",
           reportingEngineerId: (data as any)?.reporting_engineer_id || "none",
           cashierAssignedEngineerId: (data as any)?.cashier_assigned_engineer_id || "none",
+          cashierAssignedLocationId: (data as any)?.cashier_assigned_location_id || "none",
           assignedCashierId: (data as any)?.assigned_cashier_id || "none",
-          locationIds: locationIds,
+          locationId: locationId,
         });
       } catch (e) {
         setEditFormData({
@@ -662,8 +755,9 @@ export default function UserManagement() {
           role: u.role as "admin" | "engineer" | "employee" | "cashier",
           reportingEngineerId: "none",
           cashierAssignedEngineerId: "none",
+          cashierAssignedLocationId: "none",
           assignedCashierId: "none",
-          locationIds: [],
+          locationId: "none",
         });
       }
     };
@@ -711,10 +805,42 @@ export default function UserManagement() {
         updateData.assigned_cashier_id = null;
       }
       
-      // Handle cashier_assigned_engineer_id (for cashiers)
+      // Handle cashier assignment (for cashiers) - location takes priority
       if (editFormData.role === "cashier") {
-        // Check if engineer already has a cashier (unless it's the current cashier being edited)
-        if (editFormData.cashierAssignedEngineerId !== "none") {
+        // Priority: Location assignment over direct engineer assignment
+        if (editFormData.cashierAssignedLocationId && editFormData.cashierAssignedLocationId !== "none") {
+          // Check if location already has a cashier (unless it's the current cashier being edited)
+          // First get all profiles with this location assigned (excluding current user)
+          const { data: profilesWithLocation, error: profilesError } = await supabase
+            .from("profiles")
+            .select("user_id")
+            .eq("cashier_assigned_location_id", editFormData.cashierAssignedLocationId)
+            .neq("user_id", userToEdit.user_id); // Exclude current cashier
+          
+          if (profilesError) throw profilesError;
+          
+          // If any profiles have this location, check if they're cashiers
+          if (profilesWithLocation && profilesWithLocation.length > 0) {
+            const userIds = profilesWithLocation.map(p => p.user_id);
+            const { data: cashierRoles, error: rolesError } = await supabase
+              .from("user_roles")
+              .select("user_id")
+              .in("user_id", userIds)
+              .eq("role", "cashier");
+            
+            if (rolesError) throw rolesError;
+            
+            // Only throw error if we found an actual cashier (excluding the current one)
+            if (cashierRoles && cashierRoles.length > 0) {
+              throw new Error("This location already has a cashier assigned. Each location can only have one cashier.");
+            }
+          }
+
+          updateData.cashier_assigned_location_id = editFormData.cashierAssignedLocationId;
+          updateData.cashier_assigned_engineer_id = null; // Clear direct assignment when using location
+        } else if (editFormData.cashierAssignedEngineerId && editFormData.cashierAssignedEngineerId !== "none") {
+          // Fallback to direct engineer assignment
+          // Check if engineer already has a cashier (unless it's the current cashier being edited)
           const { data: existingCashier, error: checkError } = await supabase
             .from("profiles")
             .select("user_id")
@@ -727,14 +853,18 @@ export default function UserManagement() {
           if (existingCashier && existingCashier.length > 0) {
             throw new Error("This engineer already has a cashier assigned. Each engineer can only have one cashier.");
           }
+          
+          updateData.cashier_assigned_engineer_id = editFormData.cashierAssignedEngineerId;
+          updateData.cashier_assigned_location_id = null; // Clear location assignment when using direct
+        } else {
+          // Clear both if neither is selected
+          updateData.cashier_assigned_engineer_id = null;
+          updateData.cashier_assigned_location_id = null;
         }
-        
-        updateData.cashier_assigned_engineer_id = editFormData.cashierAssignedEngineerId !== "none"
-          ? editFormData.cashierAssignedEngineerId
-          : null;
       } else {
         // Clear if role is not cashier
         updateData.cashier_assigned_engineer_id = null;
+        updateData.cashier_assigned_location_id = null;
       }
       
       const { error: profileError } = await supabase
@@ -744,13 +874,32 @@ export default function UserManagement() {
 
       if (profileError) throw profileError;
 
-      // Update role
-      const { error: roleError } = await supabase
+      // If location assignment changed, trigger sync of engineers
+      if (editFormData.role === "cashier" && updateData.cashier_assigned_location_id) {
+        const { error: syncError } = await supabase.rpc('sync_engineers_with_location_cashier', {
+          location_id_param: updateData.cashier_assigned_location_id
+        });
+        if (syncError) {
+          console.error("Error syncing engineers with location cashier:", syncError);
+          // Don't throw - this is a background sync
+        }
+      }
+
+      // Update role - delete old role(s) first, then insert new one
+      // This avoids unique constraint violations
+      const { error: deleteOldRolesError } = await supabase
         .from("user_roles")
-        .update({ role: editFormData.role })
+        .delete()
         .eq("user_id", userToEdit.user_id);
 
-      if (roleError) throw roleError;
+      if (deleteOldRolesError) throw deleteOldRolesError;
+
+      // Insert new role
+      const { error: insertRoleError } = await supabase
+        .from("user_roles")
+        .insert({ user_id: userToEdit.user_id, role: editFormData.role });
+
+      if (insertRoleError) throw insertRoleError;
 
       // Update engineer locations if role is engineer
       if (editFormData.role === "engineer") {
@@ -762,16 +911,14 @@ export default function UserManagement() {
 
         if (deleteError) throw deleteError;
 
-        // Insert new location assignments
-        if (editFormData.locationIds && editFormData.locationIds.length > 0) {
-          const locationAssignments = editFormData.locationIds.map(locationId => ({
-            engineer_id: userToEdit.user_id,
-            location_id: locationId,
-          }));
-
+        // Insert new location assignment (only one location allowed)
+        if (editFormData.locationId && editFormData.locationId !== "none") {
           const { error: locationError } = await supabase
             .from("engineer_locations")
-            .insert(locationAssignments);
+            .insert({
+              engineer_id: userToEdit.user_id,
+              location_id: editFormData.locationId,
+            });
 
           if (locationError) throw locationError;
         }
@@ -798,12 +945,12 @@ export default function UserManagement() {
         .from("engineer_locations")
         .select("engineer_id, location_id");
       if (!elError && elData) {
-        const assignments: Record<string, string[]> = {};
+        const assignments: Record<string, string> = {};
         elData.forEach((el: any) => {
+          // Only store the first location for each engineer (one location per engineer)
           if (!assignments[el.engineer_id]) {
-            assignments[el.engineer_id] = [];
+            assignments[el.engineer_id] = el.location_id;
           }
-          assignments[el.engineer_id].push(el.location_id);
         });
         setEngineerLocations(assignments);
       }
@@ -814,7 +961,7 @@ export default function UserManagement() {
           setListLoading(true);
           const { data: profiles, error: profilesError } = await supabase
             .from("profiles")
-            .select("user_id, name, email, balance, reporting_engineer_id, cashier_assigned_engineer_id");
+            .select("user_id, name, email, balance, reporting_engineer_id, cashier_assigned_engineer_id, cashier_assigned_location_id");
           if (profilesError) throw profilesError;
 
           const ids = (profiles || []).map(p => p.user_id);
@@ -1060,7 +1207,7 @@ export default function UserManagement() {
           setListLoading(true);
           const { data: profiles, error: profilesError } = await supabase
             .from("profiles")
-            .select("user_id, name, email, balance, reporting_engineer_id, cashier_assigned_engineer_id");
+            .select("user_id, name, email, balance, reporting_engineer_id, cashier_assigned_engineer_id, cashier_assigned_location_id");
           if (profilesError) throw profilesError;
 
           const ids = (profiles || []).map(p => p.user_id);
@@ -1391,112 +1538,223 @@ export default function UserManagement() {
                               </div>
                             </div>
                             
-                            {/* Managers under this location */}
-                            <div className="space-y-4 sm:space-y-6">
-                              {locationData.engineers.map((item, idx) => (
-                                <div key={item.engineer.user_id || idx} className="border rounded-lg p-4 sm:p-6 bg-gradient-to-br from-blue-50 to-indigo-50 ml-0 sm:ml-4">
-                                  {/* Manager Level */}
-                                  <div className="mb-3 sm:mb-4">
-                                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0 mb-2">
-                                      <div 
-                                        className="flex items-center gap-2 sm:gap-3 cursor-pointer hover:opacity-90 transition-opacity duration-150"
-                                        onClick={() => openUserDrawer(item.engineer)}
-                                      >
-                                        <div className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-base sm:text-lg flex-shrink-0">
-                                          {item.engineer.name.charAt(0).toUpperCase()}
-                                        </div>
-                                        <div className="min-w-0 flex-1">
-                                          <div className="font-bold text-base sm:text-lg text-gray-900 truncate">{item.engineer.name}</div>
-                                          <div className="text-xs sm:text-sm text-gray-600 truncate">{item.engineer.email}</div>
-                                          <div className="text-xs sm:text-sm font-semibold text-blue-700 mt-1">
-                                            Balance: {formatINR(Number(item.engineer.balance ?? 0))}
+                            {/* Location-Based Cashiers - Shown at location level, with managers nested under them */}
+                            {locationData.cashiers && locationData.cashiers.length > 0 ? (
+                              <div className="mb-4 sm:mb-6 ml-0 sm:ml-4 space-y-4 sm:space-y-6">
+                                {locationData.cashiers.map((cashier, cashierIdx) => {
+                                  // Count total employees managed by this location cashier (all employees under all managers in this location)
+                                  const totalEmployees = locationData.engineers.reduce((sum, eng) => sum + eng.employees.length, 0);
+                                  return (
+                                    <div key={cashier.user_id || cashierIdx} className="border-2 border-purple-300 rounded-lg p-4 sm:p-6 bg-gradient-to-br from-purple-50 to-amber-50 shadow-md">
+                                      {/* Cashier Level */}
+                                      <div className="mb-4 sm:mb-6">
+                                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0 mb-2">
+                                          <div 
+                                            className="flex items-center gap-3 sm:gap-4 cursor-pointer hover:opacity-90 transition-opacity duration-150 flex-1 min-w-0"
+                                            onClick={() => openUserDrawer(cashier)}
+                                          >
+                                            <div className="w-12 h-12 sm:w-14 sm:h-14 bg-purple-600 rounded-full flex items-center justify-center text-white font-bold text-lg sm:text-xl flex-shrink-0 shadow-lg">
+                                              {cashier.name.charAt(0).toUpperCase()}
+                                            </div>
+                                            <div className="min-w-0 flex-1">
+                                              <div className="font-bold text-lg sm:text-xl text-gray-900 truncate">{cashier.name}</div>
+                                              <div className="text-sm sm:text-base text-gray-600 truncate">{cashier.email}</div>
+                                              <div className="text-sm sm:text-base font-semibold text-purple-700 mt-1">
+                                                Balance: {formatINR(Number(cashier.balance ?? 0))}
+                                              </div>
+                                            </div>
+                                            <Badge variant="default" className="bg-purple-600 text-sm sm:text-base px-3 py-1 flex-shrink-0 shadow-md">Cashier</Badge>
+                                          </div>
+                                          <div className="text-left sm:text-right">
+                                            <div className="text-sm sm:text-base text-gray-600 font-medium">Manages</div>
+                                            <div className="font-bold text-base sm:text-lg text-gray-900">
+                                              {locationData.engineers.length} Manager{locationData.engineers.length !== 1 ? 's' : ''} • {totalEmployees} Employee{totalEmployees !== 1 ? 's' : ''}
+                                            </div>
                                           </div>
                                         </div>
-                                        <Badge variant="default" className="bg-blue-600 text-xs sm:text-sm flex-shrink-0">Manager</Badge>
                                       </div>
-                                      <div className="text-left sm:text-right">
-                                        <div className="text-xs sm:text-sm text-gray-600">Team Stats</div>
-                                        <div className="font-semibold text-sm sm:text-base text-gray-900">
-                                          {item.cashierCount} Cashier{item.cashierCount !== 1 ? 's' : ''} • {item.employeeCount} Employee{item.employeeCount !== 1 ? 's' : ''}
+                                      
+                                      {/* Managers under this cashier */}
+                                      {locationData.engineers.length > 0 && (
+                                        <div className="ml-0 sm:ml-6 space-y-4 sm:space-y-5">
+                                          <div className="text-sm sm:text-base font-bold text-gray-800 mb-3 flex items-center gap-2 border-b border-blue-200 pb-2">
+                                            <Settings className="h-4 w-4 text-blue-600" />
+                                            <span>Manager{locationData.engineers.length !== 1 ? 's' : ''} ({locationData.engineers.length})</span>
+                                          </div>
+                                          {locationData.engineers.map((item, idx) => (
+                                            <div key={item.engineer.user_id || idx} className="border rounded-lg p-4 sm:p-6 bg-gradient-to-br from-blue-50 to-indigo-50">
+                                              {/* Manager Level */}
+                                              <div className="mb-3 sm:mb-4">
+                                                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0 mb-2">
+                                                  <div 
+                                                    className="flex items-center gap-2 sm:gap-3 cursor-pointer hover:opacity-90 transition-opacity duration-150"
+                                                    onClick={() => openUserDrawer(item.engineer)}
+                                                  >
+                                                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-base sm:text-lg flex-shrink-0">
+                                                      {item.engineer.name.charAt(0).toUpperCase()}
+                                                    </div>
+                                                    <div className="min-w-0 flex-1">
+                                                      <div className="font-bold text-base sm:text-lg text-gray-900 truncate">{item.engineer.name}</div>
+                                                      <div className="text-xs sm:text-sm text-gray-600 truncate">{item.engineer.email}</div>
+                                                      <div className="text-xs sm:text-sm font-semibold text-blue-700 mt-1">
+                                                        Balance: {formatINR(Number(item.engineer.balance ?? 0))}
+                                                      </div>
+                                                    </div>
+                                                    <Badge variant="default" className="bg-blue-600 text-xs sm:text-sm flex-shrink-0">Manager</Badge>
+                                                  </div>
+                                                  <div className="text-left sm:text-right">
+                                                    <div className="text-xs sm:text-sm text-gray-600">Team Stats</div>
+                                                    <div className="font-semibold text-sm sm:text-base text-gray-900">
+                                                      {item.employeeCount} Employee{item.employeeCount !== 1 ? 's' : ''}
+                                                    </div>
+                                                  </div>
+                                                </div>
+                                              </div>
+
+                                              {/* Employees Level */}
+                                              {item.employees.length > 0 && (
+                                                <div className="ml-0 sm:ml-4 md:ml-8">
+                                                  <div className="text-xs sm:text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                                                    <div className="w-12 sm:w-24 h-0.5 bg-green-300"></div>
+                                                    <span>Employees ({item.employees.length})</span>
+                                                  </div>
+                                                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                                                    {item.employees.map((employee, eIdx) => (
+                                                      <div 
+                                                        key={employee.user_id || eIdx} 
+                                                        className="bg-white rounded-lg p-3 border border-green-200 shadow-sm cursor-pointer hover:border-green-300 transition-colors"
+                                                        onClick={() => openUserDrawer(employee)}
+                                                      >
+                                                        <div className="flex items-center gap-2">
+                                                          <div className="w-6 h-6 bg-green-600 rounded-full flex items-center justify-center text-white font-bold text-xs">
+                                                            {employee.name.charAt(0).toUpperCase()}
+                                                          </div>
+                                                          <div className="flex-1 min-w-0">
+                                                            <div className="font-medium text-xs text-gray-900 truncate">{employee.name}</div>
+                                                            <div className="text-xs text-gray-500 truncate">{employee.email}</div>
+                                                          </div>
+                                                        </div>
+                                                        <div className="text-xs text-gray-600 mt-1">
+                                                          Balance: {formatINR(Number(employee.balance ?? 0))}
+                                                        </div>
+                                                      </div>
+                                                    ))}
+                                                  </div>
+                                                </div>
+                                              )}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              /* If no location-based cashiers, show managers directly under location */
+                              <div className="space-y-4 sm:space-y-6 ml-0 sm:ml-4">
+                                {locationData.engineers.map((item, idx) => (
+                                  <div key={item.engineer.user_id || idx} className="border rounded-lg p-4 sm:p-6 bg-gradient-to-br from-blue-50 to-indigo-50">
+                                    {/* Manager Level */}
+                                    <div className="mb-3 sm:mb-4">
+                                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0 mb-2">
+                                        <div 
+                                          className="flex items-center gap-2 sm:gap-3 cursor-pointer hover:opacity-90 transition-opacity duration-150"
+                                          onClick={() => openUserDrawer(item.engineer)}
+                                        >
+                                          <div className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-base sm:text-lg flex-shrink-0">
+                                            {item.engineer.name.charAt(0).toUpperCase()}
+                                          </div>
+                                          <div className="min-w-0 flex-1">
+                                            <div className="font-bold text-base sm:text-lg text-gray-900 truncate">{item.engineer.name}</div>
+                                            <div className="text-xs sm:text-sm text-gray-600 truncate">{item.engineer.email}</div>
+                                            <div className="text-xs sm:text-sm font-semibold text-blue-700 mt-1">
+                                              Balance: {formatINR(Number(item.engineer.balance ?? 0))}
+                                            </div>
+                                          </div>
+                                          <Badge variant="default" className="bg-blue-600 text-xs sm:text-sm flex-shrink-0">Manager</Badge>
+                                        </div>
+                                        <div className="text-left sm:text-right">
+                                          <div className="text-xs sm:text-sm text-gray-600">Team Stats</div>
+                                          <div className="font-semibold text-sm sm:text-base text-gray-900">
+                                            {item.cashierCount} Cashier{item.cashierCount !== 1 ? 's' : ''} • {item.employeeCount} Employee{item.employeeCount !== 1 ? 's' : ''}
+                                          </div>
                                         </div>
                                       </div>
                                     </div>
-                                  </div>
 
-                            {/* Cashiers Level - Only one cashier per manager */}
-                            {item.cashiers.length > 0 && (
-                              <div className="ml-0 sm:ml-4 md:ml-8 mb-3 sm:mb-4">
-                                <div className="text-xs sm:text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                                  <div className="w-12 sm:w-24 h-0.5 bg-purple-300"></div>
-                                  <span>Cashier{item.cashiers.length !== 1 ? 's' : ''} ({item.cashiers.length})</span>
-                                </div>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3">
-                                  {item.cashiers.map((cashier, cIdx) => {
-                                    // Count employees managed by this cashier
-                                    // All employees under the engineer are managed by the cashier assigned to that engineer
-                                    const employeesManaged = item.employees.length;
-                                    
-                                    return (
-                                      <div 
-                                        key={cashier.user_id || `cashier-${cIdx}-${cashier.name}`} 
-                                        className="bg-white rounded-lg p-4 border border-purple-200 shadow-sm cursor-pointer hover:border-purple-300 transition-colors"
-                                        onClick={() => openUserDrawer(cashier)}
-                                      >
-                                        <div className="flex items-center gap-2 mb-2">
-                                          <div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
-                                            {cashier.name.charAt(0).toUpperCase()}
-                                          </div>
-                                          <div className="flex-1 min-w-0">
-                                            <div className="font-semibold text-sm text-gray-900 truncate">{cashier.name}</div>
-                                            <div className="text-xs text-gray-500 truncate">{cashier.email}</div>
-                                          </div>
-                                          <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-300 text-xs">Cashier</Badge>
+                                    {/* Cashiers Level - Only one cashier per manager */}
+                                    {item.cashiers.length > 0 && (
+                                      <div className="ml-0 sm:ml-4 md:ml-8 mb-3 sm:mb-4">
+                                        <div className="text-xs sm:text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                                          <div className="w-12 sm:w-24 h-0.5 bg-purple-300"></div>
+                                          <span>Cashier{item.cashiers.length !== 1 ? 's' : ''} ({item.cashiers.length})</span>
                                         </div>
-                                        <div className="text-xs text-gray-600 space-y-1">
-                                          <div>Balance: {formatINR(Number(cashier.balance ?? 0))}</div>
-                                          <div>Manages: {employeesManaged} employee{employeesManaged !== 1 ? 's' : ''}</div>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3">
+                                          {item.cashiers.map((cashier, cIdx) => {
+                                            const employeesManaged = item.employees.length;
+                                            return (
+                                              <div 
+                                                key={cashier.user_id || `cashier-${cIdx}-${cashier.name}`} 
+                                                className="bg-white rounded-lg p-4 border border-purple-200 shadow-sm cursor-pointer hover:border-purple-300 transition-colors"
+                                                onClick={() => openUserDrawer(cashier)}
+                                              >
+                                                <div className="flex items-center gap-2 mb-2">
+                                                  <div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
+                                                    {cashier.name.charAt(0).toUpperCase()}
+                                                  </div>
+                                                  <div className="flex-1 min-w-0">
+                                                    <div className="font-semibold text-sm text-gray-900 truncate">{cashier.name}</div>
+                                                    <div className="text-xs text-gray-500 truncate">{cashier.email}</div>
+                                                  </div>
+                                                  <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-300 text-xs">Cashier</Badge>
+                                                </div>
+                                                <div className="text-xs text-gray-600 space-y-1">
+                                                  <div>Balance: {formatINR(Number(cashier.balance ?? 0))}</div>
+                                                  <div>Manages: {employeesManaged} employee{employeesManaged !== 1 ? 's' : ''}</div>
+                                                </div>
+                                              </div>
+                                            );
+                                          })}
                                         </div>
                                       </div>
-                                    );
-                                  })}
-                                </div>
+                                    )}
+
+                                    {/* Employees Level */}
+                                    {item.employees.length > 0 && (
+                                      <div className="ml-0 sm:ml-4 md:ml-8">
+                                        <div className="text-xs sm:text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                                          <div className="w-12 sm:w-24 h-0.5 bg-green-300"></div>
+                                          <span>Employees ({item.employees.length})</span>
+                                        </div>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                                          {item.employees.map((employee, eIdx) => (
+                                            <div 
+                                              key={employee.user_id || eIdx} 
+                                              className="bg-white rounded-lg p-3 border border-green-200 shadow-sm cursor-pointer hover:border-green-300 transition-colors"
+                                              onClick={() => openUserDrawer(employee)}
+                                            >
+                                              <div className="flex items-center gap-2">
+                                                <div className="w-6 h-6 bg-green-600 rounded-full flex items-center justify-center text-white font-bold text-xs">
+                                                  {employee.name.charAt(0).toUpperCase()}
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                  <div className="font-medium text-xs text-gray-900 truncate">{employee.name}</div>
+                                                  <div className="text-xs text-gray-500 truncate">{employee.email}</div>
+                                                </div>
+                                              </div>
+                                              <div className="text-xs text-gray-600 mt-1">
+                                                Balance: {formatINR(Number(employee.balance ?? 0))}
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
                               </div>
                             )}
-
-                                  {/* Employees Level */}
-                                  {item.employees.length > 0 && (
-                                    <div className="ml-0 sm:ml-4 md:ml-8">
-                                      <div className="text-xs sm:text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                                        <div className="w-12 sm:w-24 h-0.5 bg-green-300"></div>
-                                        <span>Employees ({item.employees.length})</span>
-                                      </div>
-                                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
-                                        {item.employees.map((employee, eIdx) => (
-                                          <div 
-                                            key={employee.user_id || eIdx} 
-                                            className="bg-white rounded-lg p-3 border border-green-200 shadow-sm cursor-pointer hover:border-green-300 transition-colors"
-                                            onClick={() => openUserDrawer(employee)}
-                                          >
-                                            <div className="flex items-center gap-2">
-                                              <div className="w-6 h-6 bg-green-600 rounded-full flex items-center justify-center text-white font-bold text-xs">
-                                                {employee.name.charAt(0).toUpperCase()}
-                                              </div>
-                                              <div className="flex-1 min-w-0">
-                                                <div className="font-medium text-xs text-gray-900 truncate">{employee.name}</div>
-                                                <div className="text-xs text-gray-500 truncate">{employee.email}</div>
-                                              </div>
-                                            </div>
-                                            <div className="text-xs text-gray-600 mt-1">
-                                              Balance: {formatINR(Number(employee.balance ?? 0))}
-                                            </div>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
                           </div>
                         ))}
                         
@@ -1812,34 +2070,68 @@ export default function UserManagement() {
                    )}
 
                    {formData.role === "cashier" && (
-                     <div className="space-y-3">
-                       <Label htmlFor="cashierEngineer" className="text-sm font-medium text-gray-700">Assign Manager (Zone/Department)</Label>
-                       <Select
-                         value={formData.cashierAssignedEngineerId || "none"}
-                         onValueChange={(value) => setFormData(prev => ({ ...prev, cashierAssignedEngineerId: value }))}
-                       >
-                         <SelectTrigger className="h-12 border-gray-200 focus:border-blue-500 focus:ring-blue-500/20 transition-colors duration-150">
-                           <SelectValue placeholder="Select engineer" />
-                         </SelectTrigger>
-                         <SelectContent className="border-0 shadow-xl">
-                           <SelectItem value="none">Unassigned (Can manage all)</SelectItem>
-                           {engineers.filter(e => {
-                             // Filter out engineers who already have a cashier assigned
-                             const engineerHasCashier = users.some(u => 
-                               u.role === "cashier" && 
-                               u.cashier_assigned_engineer_name &&
-                               // Find the engineer user by matching name
-                               users.find(eng => eng.role === "engineer" && eng.name === u.cashier_assigned_engineer_name)?.user_id === e.id
-                             );
-                             return !engineerHasCashier;
-                           }).map(e => (
-                             <SelectItem key={e.id} value={e.id}>
-                               {e.name} ({e.email})
-                             </SelectItem>
-                           ))}
-                         </SelectContent>
-                       </Select>
-                       <p className="text-xs text-gray-500">If set, this cashier can only manage employees under the selected manager's zone/department. Each manager can only have one cashier.</p>
+                     <div className="space-y-3 md:col-span-2">
+                       <div className="space-y-3">
+                         <Label htmlFor="cashierLocation" className="text-sm font-medium text-gray-700 flex items-center gap-2">
+                           <MapPin className="h-4 w-4 text-blue-600" />
+                           Assign Location (Recommended)
+                         </Label>
+                         <Select
+                           value={formData.cashierAssignedLocationId || "none"}
+                           onValueChange={(value) => setFormData(prev => ({ ...prev, cashierAssignedLocationId: value, cashierAssignedEngineerId: "none" }))}
+                         >
+                           <SelectTrigger className="h-12 border-gray-200 focus:border-blue-500 focus:ring-blue-500/20 transition-colors duration-150">
+                             <SelectValue placeholder="Select location" />
+                           </SelectTrigger>
+                           <SelectContent className="border-0 shadow-xl">
+                             <SelectItem value="none">Unassigned</SelectItem>
+                             {locations.filter(loc => {
+                               // Filter out locations that already have a cashier assigned
+                               const locationHasCashier = users.some(u => 
+                                 u.role === "cashier" && 
+                                 u.cashier_assigned_location_id === loc.id
+                               );
+                               return !locationHasCashier;
+                             }).map(loc => (
+                               <SelectItem key={loc.id} value={loc.id}>
+                                 {loc.name}
+                               </SelectItem>
+                             ))}
+                           </SelectContent>
+                         </Select>
+                         <p className="text-xs text-gray-500">If set, this cashier will manage all managers and employees in this location. Each location can only have one cashier.</p>
+                       </div>
+                       
+                       <div className="space-y-3 border-t pt-3">
+                         <Label htmlFor="cashierEngineer" className="text-sm font-medium text-gray-700">OR Assign Manager Directly (Fallback)</Label>
+                         <Select
+                           value={formData.cashierAssignedEngineerId || "none"}
+                           onValueChange={(value) => setFormData(prev => ({ ...prev, cashierAssignedEngineerId: value, cashierAssignedLocationId: "none" }))}
+                           disabled={formData.cashierAssignedLocationId && formData.cashierAssignedLocationId !== "none"}
+                         >
+                           <SelectTrigger className="h-12 border-gray-200 focus:border-blue-500 focus:ring-blue-500/20 transition-colors duration-150">
+                             <SelectValue placeholder="Select engineer" />
+                           </SelectTrigger>
+                           <SelectContent className="border-0 shadow-xl">
+                             <SelectItem value="none">Unassigned (Can manage all)</SelectItem>
+                             {engineers.filter(e => {
+                               // Filter out engineers who already have a cashier assigned
+                               const engineerHasCashier = users.some(u => 
+                                 u.role === "cashier" && 
+                                 u.cashier_assigned_engineer_name &&
+                                 // Find the engineer user by matching name
+                                 users.find(eng => eng.role === "engineer" && eng.name === u.cashier_assigned_engineer_name)?.user_id === e.id
+                               );
+                               return !engineerHasCashier;
+                             }).map(e => (
+                               <SelectItem key={e.id} value={e.id}>
+                                 {e.name} ({e.email})
+                               </SelectItem>
+                             ))}
+                           </SelectContent>
+                         </Select>
+                         <p className="text-xs text-gray-500">If set, this cashier can only manage employees under the selected manager's zone/department. Each manager can only have one cashier. (Disabled when location is selected)</p>
+                       </div>
                      </div>
                    )}
 
@@ -1847,40 +2139,42 @@ export default function UserManagement() {
                      <div className="space-y-3 md:col-span-2 border-t pt-4 mt-2">
                        <Label htmlFor="locations" className="text-sm font-medium text-gray-700 whitespace-nowrap flex items-center gap-2">
                          <MapPin className="h-4 w-4 text-blue-600" />
-                         Assign Locations
+                         Assign Location
                        </Label>
                        <div className="border rounded-lg p-3 sm:p-4 space-y-2 sm:space-y-3 max-h-40 sm:max-h-48 overflow-y-auto bg-gray-50">
                          {locations.length === 0 ? (
                            <p className="text-xs sm:text-sm text-gray-500 whitespace-nowrap">No locations available. Create locations in Settings first.</p>
                          ) : (
-                           locations.map((location) => (
-                             <div key={location.id} className="flex items-center space-x-2">
-                               <Checkbox
-                                 id={`location-${location.id}`}
-                                 checked={formData.locationIds?.includes(location.id) || false}
-                                 onCheckedChange={(checked) => {
-                                   setFormData(prev => {
-                                     const currentIds = prev.locationIds || [];
-                                     if (checked) {
-                                       return { ...prev, locationIds: [...currentIds, location.id] };
-                                     } else {
-                                       return { ...prev, locationIds: currentIds.filter(id => id !== location.id) };
-                                     }
-                                   });
-                                 }}
-                               />
+                           <RadioGroup
+                             value={formData.locationId || "none"}
+                             onValueChange={(value) => setFormData(prev => ({ ...prev, locationId: value }))}
+                           >
+                             <div key="none" className="flex items-center space-x-2">
+                               <RadioGroupItem value="none" id="location-none" />
                                <label
-                                 htmlFor={`location-${location.id}`}
+                                 htmlFor="location-none"
                                  className="text-xs sm:text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex items-center gap-2 whitespace-nowrap"
                                >
                                  <MapPin className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-gray-500 flex-shrink-0" />
-                                 <span className="truncate">{location.name}</span>
+                                 <span className="truncate">Unassigned</span>
                                </label>
                              </div>
-                           ))
+                             {locations.map((location) => (
+                               <div key={location.id} className="flex items-center space-x-2">
+                                 <RadioGroupItem value={location.id} id={`location-${location.id}`} />
+                                 <label
+                                   htmlFor={`location-${location.id}`}
+                                   className="text-xs sm:text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex items-center gap-2 whitespace-nowrap"
+                                 >
+                                   <MapPin className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-gray-500 flex-shrink-0" />
+                                   <span className="truncate">{location.name}</span>
+                                 </label>
+                               </div>
+                             ))}
+                           </RadioGroup>
                          )}
                        </div>
-                       <p className="text-xs text-gray-500 whitespace-nowrap">Select one or more locations for this manager. Useful for income tax audits and organizational structure.</p>
+                       <p className="text-xs text-gray-500 whitespace-nowrap">Select one location for this manager. Each manager can only be assigned to one location.</p>
                      </div>
                    )}
 
@@ -2310,63 +2604,91 @@ export default function UserManagement() {
                   <p className="text-xs text-muted-foreground whitespace-nowrap">Manager will return money to this cashier.</p>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="edit-locations" className="whitespace-nowrap">Assign Locations</Label>
+                  <Label htmlFor="edit-locations" className="whitespace-nowrap">Assign Location</Label>
                   <div className="border rounded-lg p-3 sm:p-4 space-y-2 sm:space-y-3 max-h-40 sm:max-h-48 overflow-y-auto">
                     {locations.length === 0 ? (
                       <p className="text-xs sm:text-sm text-gray-500 whitespace-nowrap">No locations available. Create locations in Settings first.</p>
                     ) : (
-                      locations.map((location) => (
-                        <div key={location.id} className="flex items-center space-x-2">
-                          <Checkbox
-                            id={`edit-location-${location.id}`}
-                            checked={editFormData.locationIds?.includes(location.id) || false}
-                            onCheckedChange={(checked) => {
-                              setEditFormData(prev => {
-                                const currentIds = prev.locationIds || [];
-                                if (checked) {
-                                  return { ...prev, locationIds: [...currentIds, location.id] };
-                                } else {
-                                  return { ...prev, locationIds: currentIds.filter(id => id !== location.id) };
-                                }
-                              });
-                            }}
-                          />
+                      <RadioGroup
+                        value={editFormData.locationId || "none"}
+                        onValueChange={(value) => setEditFormData(prev => ({ ...prev, locationId: value }))}
+                      >
+                        <div key="none" className="flex items-center space-x-2">
+                          <RadioGroupItem value="none" id="edit-location-none" />
                           <label
-                            htmlFor={`edit-location-${location.id}`}
+                            htmlFor="edit-location-none"
                             className="text-xs sm:text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex items-center gap-2 whitespace-nowrap"
                           >
                             <MapPin className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-gray-500 flex-shrink-0" />
-                            <span className="truncate">{location.name}</span>
+                            <span className="truncate">Unassigned</span>
                           </label>
                         </div>
-                      ))
+                        {locations.map((location) => (
+                          <div key={location.id} className="flex items-center space-x-2">
+                            <RadioGroupItem value={location.id} id={`edit-location-${location.id}`} />
+                            <label
+                              htmlFor={`edit-location-${location.id}`}
+                              className="text-xs sm:text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex items-center gap-2 whitespace-nowrap"
+                            >
+                              <MapPin className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-gray-500 flex-shrink-0" />
+                              <span className="truncate">{location.name}</span>
+                            </label>
+                          </div>
+                        ))}
+                      </RadioGroup>
                     )}
                   </div>
-                  <p className="text-xs text-muted-foreground whitespace-nowrap">Select one or more locations for this manager. Useful for income tax audits and organizational structure.</p>
+                  <p className="text-xs text-muted-foreground whitespace-nowrap">Select one location for this manager. Each manager can only be assigned to one location.</p>
                 </div>
               </>
             )}
             {editFormData.role === "cashier" && (
-              <div className="space-y-2">
-                <Label htmlFor="edit-cashier-engineer" className="whitespace-nowrap">Assign Manager (Zone/Department)</Label>
-                <Select
-                  value={editFormData.cashierAssignedEngineerId}
-                  onValueChange={(value) => setEditFormData(prev => ({ ...prev, cashierAssignedEngineerId: value }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select manager" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Unassigned (Can manage all)</SelectItem>
-                    {engineers.filter(e => {
-                      // Filter out engineers who already have a cashier (unless editing the current cashier)
-                      const engineerHasCashier = users.some(u => 
-                        u.role === "cashier" && 
-                        u.user_id !== userToEdit?.user_id && // Exclude current cashier being edited
-                        u.cashier_assigned_engineer_name &&
-                        // Find the engineer user by matching name
-                        users.find(eng => eng.role === "engineer" && eng.name === u.cashier_assigned_engineer_name)?.user_id === e.id
-                      );
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-cashier-location" className="whitespace-nowrap flex items-center gap-2">
+                    <MapPin className="h-4 w-4 text-blue-600" />
+                    Assign Location (Recommended)
+                  </Label>
+                  <Select
+                    value={editFormData.cashierAssignedLocationId || "none"}
+                    onValueChange={(value) => setEditFormData(prev => ({ ...prev, cashierAssignedLocationId: value, cashierAssignedEngineerId: "none" }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select location" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Unassigned</SelectItem>
+                      {locations.map(loc => (
+                        <SelectItem key={loc.id} value={loc.id}>
+                          {loc.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-gray-500">If set, this cashier will manage all managers and employees in this location.</p>
+                </div>
+                
+                <div className="space-y-2 border-t pt-3">
+                  <Label htmlFor="edit-cashier-engineer" className="whitespace-nowrap">OR Assign Manager Directly (Fallback)</Label>
+                  <Select
+                    value={editFormData.cashierAssignedEngineerId}
+                    onValueChange={(value) => setEditFormData(prev => ({ ...prev, cashierAssignedEngineerId: value, cashierAssignedLocationId: "none" }))}
+                    disabled={editFormData.cashierAssignedLocationId && editFormData.cashierAssignedLocationId !== "none"}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select manager" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Unassigned (Can manage all)</SelectItem>
+                      {engineers.filter(e => {
+                        // Filter out engineers who already have a cashier (unless editing the current cashier)
+                        const engineerHasCashier = users.some(u => 
+                          u.role === "cashier" && 
+                          u.user_id !== userToEdit?.user_id && // Exclude current cashier being edited
+                          u.cashier_assigned_engineer_name &&
+                          // Find the engineer user by matching name
+                          users.find(eng => eng.role === "engineer" && eng.name === u.cashier_assigned_engineer_name)?.user_id === e.id
+                        );
                       return !engineerHasCashier;
                     }).map(e => (
                       <SelectItem key={e.id} value={e.id}>
@@ -2375,8 +2697,9 @@ export default function UserManagement() {
                     ))}
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-muted-foreground whitespace-nowrap">If set, this cashier can only manage employees under the selected manager's zone/department. Each manager can only have one cashier.</p>
+                <p className="text-xs text-muted-foreground whitespace-nowrap">If set, this cashier can only manage employees under the selected manager's zone/department. Each manager can only have one cashier. (Disabled when location is selected)</p>
               </div>
+            </div>
             )}
           </div>
           <DialogFooter className="flex-shrink-0 border-t pt-4 mt-4">
